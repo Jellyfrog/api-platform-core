@@ -69,6 +69,10 @@ final class EloquentPropertyNameCollectionMetadataFactory implements PropertyNam
                 continue;
             }
 
+            if (\in_array($relation['type'], ModelMetadata::TO_MANY_RELATIONS, true)) {
+                continue;
+            }
+
             $properties[$relation['name']] = true;
         }
 

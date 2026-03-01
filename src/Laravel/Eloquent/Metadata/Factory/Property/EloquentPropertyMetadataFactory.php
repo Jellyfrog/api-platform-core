@@ -18,11 +18,6 @@ use ApiPlatform\Metadata\ApiProperty;
 use ApiPlatform\Metadata\Exception\PropertyNotFoundException;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Collection;
 use Symfony\Component\TypeInfo\Type;
 use Symfony\Component\TypeInfo\TypeIdentifier;
@@ -106,14 +101,7 @@ final class EloquentPropertyMetadataFactory implements PropertyMetadataFactoryIn
                 continue;
             }
 
-            $collection = match ($relation['type']) {
-                HasMany::class,
-                HasManyThrough::class,
-                BelongsToMany::class,
-                MorphMany::class,
-                MorphToMany::class => true,
-                default => false,
-            };
+            $collection = \in_array($relation['type'], ModelMetadata::TO_MANY_RELATIONS, true);
 
             $type = Type::object($relation['related']);
             if ($collection) {
