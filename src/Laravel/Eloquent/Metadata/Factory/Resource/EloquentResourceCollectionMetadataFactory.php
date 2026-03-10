@@ -70,10 +70,6 @@ final class EloquentResourceCollectionMetadataFactory implements ResourceMetadat
 
         try {
             $refl = new \ReflectionClass($resourceClass);
-            if ($refl->isAbstract()) {
-                return $resourceMetadataCollection;
-            }
-
             $model = $refl->newInstanceWithoutConstructor();
         } catch (\ReflectionException) {
             return $this->decorated->create($resourceClass);

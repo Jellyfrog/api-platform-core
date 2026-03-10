@@ -34,10 +34,6 @@ class EloquentExtractor implements PropertyAccessExtractorInterface
 
         try {
             $refl = new \ReflectionClass($class);
-            if ($refl->isAbstract()) {
-                return null;
-            }
-
             $model = $refl->newInstanceWithoutConstructor();
         } catch (\ReflectionException) {
             return null;
@@ -73,10 +69,6 @@ class EloquentExtractor implements PropertyAccessExtractorInterface
 
         try {
             $refl = new \ReflectionClass($class);
-            if ($refl->isAbstract()) {
-                return null;
-            }
-
             $model = $refl->newInstanceWithoutConstructor();
         } catch (\ReflectionException) {
             return null;
