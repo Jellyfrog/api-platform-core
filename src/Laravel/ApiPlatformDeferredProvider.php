@@ -107,6 +107,11 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
         $classes = ReflectionClassRecursiveIterator::getReflectionClassesFromDirectories([$directory], '(?!.*Test\.php$)');
 
         foreach ($classes as $className => $refl) {
+            if ($refl->isAbstract()) {
+                unset($classes[$className]);
+                continue;
+            }
+
             foreach ($refl->getAttributes() as $attribute) {
                 if (SkipAutoconfigure::class === $attribute->getName()) {
                     unset($classes[$className]);
