@@ -53,6 +53,10 @@ final class EloquentPropertyMetadataFactory implements PropertyMetadataFactoryIn
 
         try {
             $refl = new \ReflectionClass($resourceClass);
+            if ($refl->isAbstract()) {
+                return $this->decorated?->create($resourceClass, $property, $options) ?? new ApiProperty();
+            }
+
             $model = $refl->newInstanceWithoutConstructor();
         } catch (\ReflectionException) {
             return $this->decorated?->create($resourceClass, $property, $options) ?? new ApiProperty();

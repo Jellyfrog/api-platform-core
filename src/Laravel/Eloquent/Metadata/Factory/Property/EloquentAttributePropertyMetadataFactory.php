@@ -37,6 +37,11 @@ final class EloquentAttributePropertyMetadataFactory implements PropertyMetadata
         }
 
         $refl = new \ReflectionClass($resourceClass);
+        if ($refl->isAbstract()) {
+            return $this->decorated?->create($resourceClass, $property, $options) ??
+                $this->throwNotFound($resourceClass, $property);
+        }
+
         $model = $refl->newInstanceWithoutConstructor();
 
         $propertyMetadata = $this->decorated?->create($resourceClass, $property, $options);
