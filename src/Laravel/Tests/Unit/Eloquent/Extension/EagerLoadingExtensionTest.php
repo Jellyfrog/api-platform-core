@@ -18,301 +18,129 @@ use ApiPlatform\Laravel\Eloquent\Metadata\ModelMetadata;
 use ApiPlatform\Metadata\ApiProperty;
 use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
-use ApiPlatform\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Orchestra\Testbench\TestCase;
+use Workbench\App\Models\Author;
 use Workbench\App\Models\Book;
 
 class EagerLoadingExtensionTest extends TestCase
 {
-    /**
-     * @param array<class-string, array<string, mixed>> $relationsCache
-     */
-    private function createModelMetadataWithCache(array $relationsCache): ModelMetadata
-    {
-        $modelMetadata = new ModelMetadata();
-        $refl = new \ReflectionProperty(ModelMetadata::class, 'relationsLocalCache');
-        $refl->setValue($modelMetadata, $relationsCache);
-
-        return $modelMetadata;
-    }
+    /** @var Builder<Model> */
+    private Builder $builder;
 
     public function testNoGroupsReturnsBuilderUnchanged(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-        $modelMetadata = $this->createModelMetadataWithCache([]);
+        $result = $this->applyExtension([], new ApiProperty(readable: true), null, normalizationContext: null);
 
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->never())->method('with');
-
-        $operation = new Get(class: Book::class);
-
-        $result = $extension->apply($builder, [], $operation);
-        $this->assertSame($builder, $result);
+        $this->assertSame($this->builder, $result);
     }
 
     public function testRelationInGroupIsEagerLoaded(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'author' => [
-                    'name' => 'author',
-                    'method_name' => 'author',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => Book::class,
-                    'foreign_key' => 'author_id',
-                ],
-            ],
-        ]);
-
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
+        $this->applyExtension(
+            [Book::class => ['author' => $this->relation('author', Book::class)]],
+            new ApiProperty(readable: true, readableLink: false),
+            ['author'],
         );
-
-        $propertyMetadataFactory->method('create')->willReturn(
-            new ApiProperty(readable: true, readableLink: false)
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->once())
-            ->method('with')
-            ->with(['author'])
-            ->willReturnSelf();
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']]);
-
-        $extension->apply($builder, [], $operation);
     }
 
     public function testUriTemplateRelationIsSkipped(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'comments' => [
-                    'name' => 'comments',
-                    'method_name' => 'comments',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\HasMany',
-                    'related' => Book::class,
-                    'foreign_key' => 'post_id',
-                ],
-            ],
-        ]);
-
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
+        $this->applyExtension(
+            [Book::class => ['comments' => $this->relation('comments', Book::class)]],
+            new ApiProperty(readable: true, uriTemplate: '/posts/{post}/comments{._format}'),
+            null,
         );
-
-        $propertyMetadataFactory->method('create')->willReturn(
-            new ApiProperty(readable: true, uriTemplate: '/posts/{post}/comments{._format}')
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->never())->method('with');
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['post:read']]);
-
-        $extension->apply($builder, [], $operation);
     }
 
     public function testFetchEagerFalseIsSkipped(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'author' => [
-                    'name' => 'author',
-                    'method_name' => 'author',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => Book::class,
-                    'foreign_key' => 'author_id',
-                ],
-            ],
-        ]);
-
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
+        $this->applyExtension(
+            [Book::class => ['author' => $this->relation('author', Book::class)]],
+            new ApiProperty(readable: true, fetchEager: false),
+            null,
         );
-
-        $propertyMetadataFactory->method('create')->willReturn(
-            new ApiProperty(readable: true, fetchEager: false)
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->never())->method('with');
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']]);
-
-        $extension->apply($builder, [], $operation);
     }
 
     public function testForceEagerFalseOnlyLoadsExplicitFetchEager(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'author' => [
-                    'name' => 'author',
-                    'method_name' => 'author',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => Book::class,
-                    'foreign_key' => 'author_id',
-                ],
-                'editor' => [
-                    'name' => 'editor',
-                    'method_name' => 'editor',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => Book::class,
-                    'foreign_key' => 'editor_id',
-                ],
-            ],
-        ]);
-
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
+        $this->applyExtension(
+            [Book::class => [
+                'author' => $this->relation('author', Book::class),
+                'editor' => $this->relation('editor', Book::class),
+            ]],
+            static fn (string $resourceClass, string $property): ApiProperty => 'editor' === $property
+                ? new ApiProperty(readable: true, fetchEager: true)
+                : new ApiProperty(readable: true),
+            ['editor'],
             forceEager: false,
         );
-
-        $propertyMetadataFactory->method('create')->willReturnCallback(
-            static function (string $resourceClass, string $property) {
-                if ('editor' === $property) {
-                    return new ApiProperty(readable: true, fetchEager: true);
-                }
-
-                return new ApiProperty(readable: true);
-            }
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->once())
-            ->method('with')
-            ->with(['editor'])
-            ->willReturnSelf();
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']]);
-
-        $extension->apply($builder, [], $operation);
     }
 
     public function testSelfReferencingRelationDoesNotLoop(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
-        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
-
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'parent' => [
-                    'name' => 'parent',
-                    'method_name' => 'parent',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => Book::class,
-                    'foreign_key' => 'parent_id',
-                ],
-            ],
-        ]);
-
-        $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
-            $propertyMetadataFactory,
-            $modelMetadata,
+        $this->applyExtension(
+            [Book::class => ['parent' => $this->relation('parent', Book::class)]],
+            new ApiProperty(readable: true, readableLink: true),
+            ['parent'],
         );
-
-        $propertyMetadataFactory->method('create')->willReturn(
-            new ApiProperty(readable: true, readableLink: true)
-        );
-
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->once())
-            ->method('with')
-            ->with(['parent'])
-            ->willReturnSelf();
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']]);
-
-        $extension->apply($builder, [], $operation);
     }
 
     public function testNestedEagerLoading(): void
     {
-        $propertyNameCollectionFactory = $this->createMock(PropertyNameCollectionFactoryInterface::class);
+        $this->applyExtension(
+            [
+                Book::class => ['author' => $this->relation('author', Author::class)],
+                Author::class => ['books' => $this->relation('books', Book::class)],
+            ],
+            new ApiProperty(readable: true, readableLink: true),
+            ['author', 'author.books'],
+        );
+    }
+
+    /**
+     * Runs the extension over a seeded relation graph.
+     *
+     * @param array<class-string, array<string, mixed>> $relations          seeds the model relation cache
+     * @param ApiProperty|\Closure                      $propertyMetadata   the metadata returned for every property, or a callable returning it
+     * @param list<string>|null                         $expectedEagerLoads the relations expected to be eager loaded, null when none should be
+     * @param array<string, mixed>|null                 $normalizationContext
+     *
+     * @return Builder<Model>
+     */
+    private function applyExtension(array $relations, ApiProperty|\Closure $propertyMetadata, ?array $expectedEagerLoads, bool $forceEager = true, ?array $normalizationContext = ['groups' => ['book:read']]): Builder
+    {
         $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturnCallback(
+            $propertyMetadata instanceof \Closure ? $propertyMetadata : (static fn (): ApiProperty => $propertyMetadata)
+        );
 
-        $authorModel = new class extends \Illuminate\Database\Eloquent\Model {
-            protected $table = 'authors';
-        };
+        $this->builder = $builder = $this->createMock(Builder::class);
+        $builder->method('getModel')->willReturn(new Book());
 
-        $modelMetadata = $this->createModelMetadataWithCache([
-            Book::class => [
-                'author' => [
-                    'name' => 'author',
-                    'method_name' => 'author',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\BelongsTo',
-                    'related' => $authorModel::class,
-                    'foreign_key' => 'author_id',
-                ],
-            ],
-            $authorModel::class => [
-                'books' => [
-                    'name' => 'books',
-                    'method_name' => 'books',
-                    'type' => 'Illuminate\Database\Eloquent\Relations\HasMany',
-                    'related' => Book::class,
-                    'foreign_key' => 'author_id',
-                ],
-            ],
-        ]);
+        if (null === $expectedEagerLoads) {
+            $builder->expects($this->never())->method('with');
+        } else {
+            $builder->expects($this->once())->method('with')->with($expectedEagerLoads)->willReturnSelf();
+        }
 
         $extension = new EagerLoadingExtension(
-            $propertyNameCollectionFactory,
             $propertyMetadataFactory,
-            $modelMetadata,
+            new ModelMetadata(relations: $relations),
+            forceEager: $forceEager,
         );
 
-        $propertyMetadataFactory->method('create')->willReturn(
-            new ApiProperty(readable: true, readableLink: true)
-        );
+        return $extension->apply($builder, [], new Get(class: Book::class, normalizationContext: $normalizationContext));
+    }
 
-        $builder = $this->createMock(Builder::class);
-        $builder->method('getModel')->willReturn(new Book());
-        $builder->expects($this->once())
-            ->method('with')
-            ->with($this->callback(function (array $relations) {
-                return \in_array('author', $relations, true) && \in_array('author.books', $relations, true);
-            }))
-            ->willReturnSelf();
-
-        $operation = new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']]);
-
-        $extension->apply($builder, [], $operation);
+    /**
+     * @param class-string<Model> $related
+     *
+     * @return array{name: string, method_name: string, related: class-string<Model>}
+     */
+    private function relation(string $name, string $related): array
+    {
+        return ['name' => $name, 'method_name' => $name, 'related' => $related];
     }
 }

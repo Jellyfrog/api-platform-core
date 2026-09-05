@@ -38,7 +38,6 @@ use ApiPlatform\Laravel\Eloquent\Filter\PartialSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\RangeFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\StartSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Metadata\Factory\Resource\EloquentResourceCollectionMetadataFactory;
-use ApiPlatform\Laravel\Eloquent\Metadata\ModelMetadata;
 use ApiPlatform\Laravel\Eloquent\State\CollectionProvider;
 use ApiPlatform\Laravel\Eloquent\State\ItemProvider;
 use ApiPlatform\Laravel\Eloquent\State\LinksHandler;
@@ -117,15 +116,10 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             }
         }
 
-        $this->autoconfigure($classes, QueryExtensionInterface::class, [EagerLoadingExtension::class, FilterQueryExtension::class]);
+        $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class, EagerLoadingExtension::class]);
 
-        $this->app->bind(EagerLoadingExtension::class, static function (Application $app) {
-            return new EagerLoadingExtension(
-                $app->make(PropertyNameCollectionFactoryInterface::class),
-                $app->make(PropertyMetadataFactoryInterface::class),
-                $app->make(ModelMetadata::class),
-            );
-        });
+        // Stateless and autowirable: registered as a singleton so its computed eager loads are reused across queries.
+        $this->app->singleton(EagerLoadingExtension::class);
 
         $this->app->singleton(ItemProvider::class, static function (Application $app) {
             $tagged = iterator_to_array($app->tagged(LinksHandlerInterface::class));

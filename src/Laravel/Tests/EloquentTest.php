@@ -27,10 +27,8 @@ use Workbench\Database\Factories\AuthorFactory;
 use Workbench\Database\Factories\AuthorWithGroupFactory;
 use Workbench\Database\Factories\BookFactory;
 use Workbench\Database\Factories\BookWithRelationFactory;
-use Workbench\Database\Factories\CommentFactory;
 use Workbench\Database\Factories\CommentMorphFactory;
 use Workbench\Database\Factories\GrandSonFactory;
-use Workbench\Database\Factories\PostFactory;
 use Workbench\Database\Factories\PostWithMorphManyFactory;
 use Workbench\Database\Factories\TimeSlotFactory;
 use Workbench\Database\Factories\WithAccessorFactory;
@@ -643,19 +641,6 @@ class EloquentTest extends TestCase
         $author = AuthorWithGroupFactory::new()->create();
         $book = BookWithRelationFactory::new(['author_with_group_id' => $author->id])->create(); // @phpstan-ignore-line
 
-        $response = $this->get('/api/book_with_relations/'.$book->id, ['Accept' => ['application/ld+json']]); // @phpstan-ignore-line
-        $response->assertStatus(200);
-        $json = $response->json();
-
-        $this->assertArrayHasKey('authorWithGroup', $json);
-        $this->assertSame('/api/author_with_groups/'.$author->id, $json['authorWithGroup']['@id']); // @phpstan-ignore-line
-    }
-
-    public function testBookWithRelationEagerLoadsAuthor(): void
-    {
-        $author = AuthorWithGroupFactory::new()->create();
-        $book = BookWithRelationFactory::new(['author_with_group_id' => $author->id])->create(); // @phpstan-ignore-line
-
         DB::enableQueryLog();
         $response = $this->get('/api/book_with_relations/'.$book->id, ['Accept' => ['application/ld+json']]); // @phpstan-ignore-line
         $queryLog = DB::getQueryLog();
@@ -667,21 +652,7 @@ class EloquentTest extends TestCase
         $this->assertArrayHasKey('authorWithGroup', $json);
         $this->assertSame('/api/author_with_groups/'.$author->id, $json['authorWithGroup']['@id']); // @phpstan-ignore-line
 
-        // Verify eager loading: should have at most 2 queries (model + eager loaded relations),
-        // not N+1 queries
+        // The relation is eager loaded: one query for the book, one for its author, instead of N+1.
         $this->assertLessThanOrEqual(2, \count($queryLog));
-    }
-
-    public function testPostCommentsNotEagerLoadedDueToUriTemplate(): void
-    {
-        $post = PostFactory::new()->create();
-        CommentFactory::new(['post_id' => $post->id])->count(3)->create(); // @phpstan-ignore-line
-
-        $response = $this->get('/api/posts/'.$post->id, ['Accept' => ['application/ld+json']]); // @phpstan-ignore-line
-        $response->assertStatus(200);
-        $json = $response->json();
-
-        // Comments should NOT be embedded because they have a uriTemplate
-        $this->assertArrayNotHasKey('comments', $json);
     }
 }

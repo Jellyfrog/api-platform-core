@@ -18,19 +18,22 @@ use ApiPlatform\Metadata\Exception\PropertyNotFoundException;
 use ApiPlatform\Metadata\Exception\ResourceClassNotFoundException;
 use ApiPlatform\Metadata\Operation;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
-use ApiPlatform\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 
-final readonly class EagerLoadingExtension implements QueryExtensionInterface
+final class EagerLoadingExtension implements QueryExtensionInterface
 {
+    /**
+     * @var array<string, list<string>>
+     */
+    private array $localCache = [];
+
     public function __construct(
-        private PropertyNameCollectionFactoryInterface $propertyNameCollectionFactory,
-        private PropertyMetadataFactoryInterface $propertyMetadataFactory,
-        private ModelMetadata $modelMetadata,
-        private bool $forceEager = true,
-        private int $maxJoins = 30,
+        private readonly PropertyMetadataFactoryInterface $propertyMetadataFactory,
+        private readonly ModelMetadata $modelMetadata,
+        private readonly bool $forceEager = true,
+        private readonly int $maxJoins = 30,
     ) {
     }
 
@@ -43,10 +46,7 @@ final readonly class EagerLoadingExtension implements QueryExtensionInterface
      */
     public function apply(Builder $builder, array $uriVariables, Operation $operation, $context = []): Builder
     {
-        $resourceClass = $builder->getModel()::class;
-        $forceEager = $operation->getForceEager() ?? $this->forceEager;
-
-        if (!isset($context['groups']) && !isset($context['attributes'])) {
+        if (!isset($context[AbstractNormalizer::GROUPS]) && !isset($context[AbstractNormalizer::ATTRIBUTES])) {
             $context += $operation->getNormalizationContext() ?? [];
         }
 
@@ -59,7 +59,11 @@ final readonly class EagerLoadingExtension implements QueryExtensionInterface
             $options['serializer_groups'] = (array) $context[AbstractNormalizer::GROUPS];
         }
 
-        $eagerRelations = $this->getEagerRelations($resourceClass, $forceEager, $options);
+        $eagerRelations = $this->getEagerRelations(
+            $builder->getModel()::class,
+            $operation->getForceEager() ?? $this->forceEager,
+            $options,
+        );
 
         if ([] !== $eagerRelations) {
             $builder->with($eagerRelations);
@@ -69,72 +73,69 @@ final readonly class EagerLoadingExtension implements QueryExtensionInterface
     }
 
     /**
-     * @param class-string         $resourceClass
+     * The relations to eager load are computed from static metadata only, cache them per model and serialization context.
+     *
+     * @param class-string<Model>  $modelClass
      * @param array<string, mixed> $options
-     * @param array<class-string>  $visited
      *
      * @return list<string>
      */
-    private function getEagerRelations(string $resourceClass, bool $forceEager, array $options, array $visited = [], string $prefix = '', int &$joinCount = 0): array
+    private function getEagerRelations(string $modelClass, bool $forceEager, array $options): array
     {
-        if ($joinCount >= $this->maxJoins) {
-            return [];
+        $key = hash('xxh3', serialize([$modelClass, $forceEager, $options]));
+
+        if (isset($this->localCache[$key])) {
+            return $this->localCache[$key];
         }
 
-        if (\in_array($resourceClass, $visited, true)) {
-            return [];
-        }
-
-        $visited[] = $resourceClass;
-
-        $model = new $resourceClass();
-        if (!$model instanceof Model) {
-            return [];
-        }
-
-        $relations = $this->modelMetadata->getRelations($model);
         $eagerRelations = [];
+        $this->collectEagerRelations($modelClass, $forceEager, $options, $eagerRelations);
 
-        foreach ($relations as $relation) {
-            if ($joinCount >= $this->maxJoins) {
+        return $this->localCache[$key] = $eagerRelations;
+    }
+
+    /**
+     * @param class-string<Model>  $modelClass
+     * @param array<string, mixed> $options
+     * @param list<string>         $eagerRelations
+     * @param array<class-string>  $visited
+     */
+    private function collectEagerRelations(string $modelClass, bool $forceEager, array $options, array &$eagerRelations, array $visited = [], string $prefix = ''): void
+    {
+        if (\count($eagerRelations) >= $this->maxJoins || \in_array($modelClass, $visited, true) || !is_a($modelClass, Model::class, true)) {
+            return;
+        }
+
+        $visited[] = $modelClass;
+
+        foreach ($this->modelMetadata->getRelations(new $modelClass()) as $relation) {
+            if (\count($eagerRelations) >= $this->maxJoins) {
                 break;
             }
 
             try {
-                $propertyMetadata = $this->propertyMetadataFactory->create($resourceClass, $relation['name'], $options);
-            } catch (PropertyNotFoundException) {
-                continue;
-            } catch (ResourceClassNotFoundException) {
+                $propertyMetadata = $this->propertyMetadataFactory->create($modelClass, $relation['name'], $options);
+            } catch (PropertyNotFoundException|ResourceClassNotFoundException) {
                 continue;
             }
 
             $fetchEager = $propertyMetadata->getFetchEager();
-            $uriTemplate = $propertyMetadata->getUriTemplate();
 
-            if (false === $fetchEager || null !== $uriTemplate) {
+            // Skip relations that opted out, are not readable, or are exposed through their own URI: those are linked to, not embedded.
+            if (false === $fetchEager
+                || null !== $propertyMetadata->getUriTemplate()
+                || false === $propertyMetadata->isReadable()
+                || (!$forceEager && true !== $fetchEager)
+            ) {
                 continue;
             }
 
-            if (false === $propertyMetadata->isReadable()) {
-                continue;
-            }
-
-            if (!$forceEager && true !== $fetchEager) {
-                continue;
-            }
-
-            $methodName = $relation['method_name'];
-            $path = '' === $prefix ? $methodName : $prefix.'.'.$methodName;
+            $path = '' === $prefix ? $relation['method_name'] : $prefix.'.'.$relation['method_name'];
             $eagerRelations[] = $path;
-            ++$joinCount;
 
-            $relatedClass = $relation['related'];
             if (true === $propertyMetadata->isReadableLink() || true === $fetchEager) {
-                $nested = $this->getEagerRelations($relatedClass, $forceEager, $options, $visited, $path, $joinCount);
-                $eagerRelations = array_merge($eagerRelations, $nested);
+                $this->collectEagerRelations($relation['related'], $forceEager, $options, $eagerRelations, $visited, $path);
             }
         }
-
-        return $eagerRelations;
     }
 }
