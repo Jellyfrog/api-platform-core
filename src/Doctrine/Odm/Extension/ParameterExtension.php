@@ -22,6 +22,7 @@ use Doctrine\Bundle\MongoDBBundle\ManagerRegistry;
 use Doctrine\ODM\MongoDB\Aggregation\Builder;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 
 /**
  * Reads operation parameters and execute its filter.
@@ -36,10 +37,12 @@ final class ParameterExtension implements AggregationCollectionExtensionInterfac
         ContainerInterface $filterLocator,
         ?ManagerRegistry $managerRegistry = null,
         ?LoggerInterface $logger = null,
+        ?NameConverterInterface $nameConverter = null,
     ) {
         $this->filterLocator = $filterLocator;
         $this->managerRegistry = $managerRegistry;
         $this->logger = $logger;
+        $this->nameConverter = $nameConverter;
     }
 
     /**
@@ -69,12 +72,18 @@ final class ParameterExtension implements AggregationCollectionExtensionInterfac
 
             $this->configureFilter($filter, $parameter);
 
+            $previousFilters = $context['filters'] ?? null;
             $context['filters'] = $values;
             $context['parameter'] = $parameter;
 
             $filter->apply($aggregationBuilder, $resourceClass, $operation, $context);
 
-            unset($context['filters'], $context['parameter']);
+            unset($context['parameter']);
+            if (null !== $previousFilters) {
+                $context['filters'] = $previousFilters;
+            } else {
+                unset($context['filters']);
+            }
         }
 
         if (isset($context['match'])) {

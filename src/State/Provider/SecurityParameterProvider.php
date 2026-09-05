@@ -30,8 +30,6 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * Loops over parameters to check parameter security.
  * Throws an exception if security is not granted.
  *
- * @experimental
- *
  * @implements ProviderInterface<object>
  */
 final class SecurityParameterProvider implements ProviderInterface
@@ -52,7 +50,8 @@ final class SecurityParameterProvider implements ProviderInterface
 
         $operation = $request?->attributes->get('_api_operation') ?? $operation;
 
-        $parameters = $operation->getParameters() ?? new Parameters();
+        $existingParameters = $operation->getParameters();
+        $parameters = $existingParameters ? clone $existingParameters : new Parameters();
 
         if ($operation instanceof HttpOperation) {
             foreach ($operation->getUriVariables() ?? [] as $key => $uriVariable) {

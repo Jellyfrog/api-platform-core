@@ -58,6 +58,7 @@ final class EloquentResourceCollectionMetadataFactory implements ResourceMetadat
 
     public function __construct(
         private readonly ResourceMetadataCollectionFactoryInterface $decorated,
+        private readonly bool $partialPatchValidation = false,
     ) {
     }
 
@@ -70,9 +71,12 @@ final class EloquentResourceCollectionMetadataFactory implements ResourceMetadat
 
         try {
             $refl = new \ReflectionClass($resourceClass);
+            if ($refl->isEnum()) {
+                return $resourceMetadataCollection;
+            }
             $model = $refl->newInstanceWithoutConstructor();
         } catch (\ReflectionException) {
-            return $this->decorated->create($resourceClass);
+            return $resourceMetadataCollection;
         }
 
         $isModel = $model instanceof Model;
@@ -105,6 +109,19 @@ final class EloquentResourceCollectionMetadataFactory implements ResourceMetadat
 
                 if (!$operation->getProcessor()) {
                     $operation = $operation->withProcessor($operation instanceof DeleteOperationInterface ? RemoveProcessor::class : PersistProcessor::class);
+                }
+
+                if ($this->partialPatchValidation && $operation instanceof Patch) {
+                    $rules = $operation->getRules();
+                    if (\is_array($rules)) {
+                        $stringKeyedRules = [];
+                        foreach ($rules as $field => $fieldRules) {
+                            if (\is_string($field)) {
+                                $stringKeyedRules[$field] = $fieldRules;
+                            }
+                        }
+                        $operation = $operation->withRules($this->replaceRequiredWithSometimes($stringKeyedRules));
+                    }
                 }
 
                 $operations->add($operationName, $operation);
@@ -147,5 +164,27 @@ final class EloquentResourceCollectionMetadataFactory implements ResourceMetadat
         }
 
         return $resourceMetadataCollection;
+    }
+
+    /**
+     * Replaces 'required' with 'sometimes' in validation rules for partial updates.
+     *
+     * @param array<string, mixed> $rules
+     *
+     * @return array<string, mixed>
+     */
+    private function replaceRequiredWithSometimes(array $rules): array
+    {
+        foreach ($rules as $field => $fieldRules) {
+            if (\is_string($fieldRules)) {
+                $parts = explode('|', $fieldRules);
+                $parts = array_map(static fn (string $rule): string => 'required' === $rule ? 'sometimes' : $rule, $parts);
+                $rules[$field] = implode('|', $parts);
+            } elseif (\is_array($fieldRules)) {
+                $rules[$field] = array_map(static fn (mixed $rule): mixed => 'required' === $rule ? 'sometimes' : $rule, $fieldRules);
+            }
+        }
+
+        return $rules;
     }
 }

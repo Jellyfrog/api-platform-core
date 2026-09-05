@@ -66,14 +66,6 @@ return function (ContainerConfigurator $container) {
             '%api_platform.defaults%',
         ]);
 
-    $services->set('api_platform.metadata.resource.metadata_collection_factory.mutator', MutatorResourceMetadataCollectionFactory::class)
-        ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 800)
-        ->args([
-            service('api_platform.metadata.mutator_collection.resource'),
-            service('api_platform.metadata.mutator_collection.operation'),
-            service('api_platform.metadata.resource.metadata_collection_factory.mutator.inner'),
-        ]);
-
     $services->set('api_platform.metadata.resource.metadata_collection_factory.concerns', ConcernsResourceMetadataCollectionFactory::class)
         ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 800)
         ->args([
@@ -117,6 +109,14 @@ return function (ContainerConfigurator $container) {
             '%api_platform.graphql.enabled%',
         ]);
 
+    $services->set('api_platform.metadata.resource.metadata_collection_factory.mutator', MutatorResourceMetadataCollectionFactory::class)
+        ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 400)
+        ->args([
+            service('api_platform.metadata.mutator_collection.resource'),
+            service('api_platform.metadata.mutator_collection.operation'),
+            service('api_platform.metadata.resource.metadata_collection_factory.mutator.inner'),
+        ]);
+
     $services->set('api_platform.metadata.resource.metadata_collection_factory.operation_name', OperationNameResourceMetadataCollectionFactory::class)
         ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 200)
         ->args([service('api_platform.metadata.resource.metadata_collection_factory.operation_name.inner')]);
@@ -132,6 +132,7 @@ return function (ContainerConfigurator $container) {
             '%api_platform.formats%',
             '%api_platform.patch_formats%',
             '%api_platform.error_formats%',
+            '%api_platform.mcp.format%',
         ]);
 
     $services->set('api_platform.metadata.resource.metadata_collection_factory.filters', FiltersResourceMetadataCollectionFactory::class)
@@ -151,6 +152,7 @@ return function (ContainerConfigurator $container) {
             service('api_platform.filter_locator')->ignoreOnInvalid(),
             service('api_platform.name_converter')->ignoreOnInvalid(),
             service('logger')->ignoreOnInvalid(),
+            service('api_platform.resource_class_resolver')->ignoreOnInvalid(),
         ]);
 
     $services->set('api_platform.metadata.resource.metadata_collection_factory.cached', CachedResourceMetadataCollectionFactory::class)

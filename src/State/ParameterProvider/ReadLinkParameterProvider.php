@@ -26,8 +26,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Checks if the linked resources have security attributes and prepares them for access checking.
- *
- * @experimental
  */
 final class ReadLinkParameterProvider implements ParameterProviderInterface
 {
@@ -87,7 +85,13 @@ final class ReadLinkParameterProvider implements ParameterProviderInterface
             throw new NotFoundHttpException('Relation for link security not found.');
         }
 
-        $context['request']?->attributes->set($securityObjectName, $relation);
+        // Only set the request attribute if the security object name differs from the parameter key.
+        // When they are the same, SecurityParameterProvider already has the value via $parameter->getKey() => $value,
+        // and setting the request attribute would overwrite the route parameter (a scalar) with an entity object,
+        // breaking IRI generation.
+        if ($securityObjectName !== $parameter->getKey()) {
+            $context['request']?->attributes->set($securityObjectName, $relation);
+        }
 
         if ($parameter instanceof Link) {
             $uriVariables = $operation->getUriVariables();
@@ -99,11 +103,13 @@ final class ReadLinkParameterProvider implements ParameterProviderInterface
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function getUriVariables(mixed $value, Parameter $parameter, Operation $operation): array
     {
-        $extraProperties = $parameter->getExtraProperties();
+        if (\is_array($value)) {
+            return $value;
+        }
 
         if ($operation instanceof HttpOperation) {
             $links = $operation->getUriVariables();
@@ -113,24 +119,30 @@ final class ReadLinkParameterProvider implements ParameterProviderInterface
             $links = [];
         }
 
-        if (!\is_array($value)) {
-            $uriVariables = [];
+        $extraProperties = $parameter->getExtraProperties();
+        $linkClass = $parameter instanceof Link
+            ? ($parameter->getFromClass() ?? $parameter->getToClass())
+            : null;
 
-            foreach ($links as $key => $link) {
-                if (!\is_string($key)) {
-                    $key = $link->getParameterName() ?? $extraProperties['uri_variable'] ?? $link->getFromProperty();
-                }
-
-                if (!$key || !\is_string($key)) {
-                    continue;
-                }
-
-                $uriVariables[$key] = $value;
+        $fallbackKey = null;
+        foreach ($links as $key => $link) {
+            if (!\is_string($key)) {
+                $key = $link->getParameterName() ?? $extraProperties['uri_variable'] ?? $link->getFromProperty();
             }
 
-            return $uriVariables;
+            if (!$key || !\is_string($key)) {
+                continue;
+            }
+
+            $linkFromClass = $link instanceof Link ? ($link->getFromClass() ?? $link->getToClass()) : null;
+
+            if (null !== $linkClass && $linkFromClass === $linkClass) {
+                return [$key => $value];
+            }
+
+            $fallbackKey ??= $key;
         }
 
-        return $value;
+        return null === $fallbackKey ? [] : [$fallbackKey => $value];
     }
 }

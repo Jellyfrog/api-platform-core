@@ -59,6 +59,7 @@ parameters:
 				- tests/Fixtures/TestBundle/Document/
 				- tests/Fixtures/TestBundle/Entity/
 				- src/OpenApi/Factory/OpenApiFactory.php
+				- src/JsonLd/Serializer/ObjectNormalizer.php
 		-
 			message: '#is never assigned .* so it can be removed from the property type.#'
 			paths:
@@ -83,20 +84,15 @@ parameters:
 			path: src/GraphQl/Tests/Type/TypesContainerTest.php
 
 		# Expected, due to backward compatibility
-		- '#Method GraphQL\\Type\\Definition\\WrappingType::getWrappedType\(\) invoked with 1 parameter, 0 required\.#'
 		- '#Access to an undefined property GraphQL\\Type\\Definition\\NamedType&GraphQL\\Type\\Definition\\Type::\$name\.#'
-		- "#Call to function method_exists\\(\\) with GraphQL\\\\Type\\\\Definition\\\\Type&GraphQL\\\\Type\\\\Definition\\\\WrappingType and 'getInnermostType' will always evaluate to true\\.#"
 		- "#Call to function method_exists\\(\\) with 'Symfony\\\\\\\\Component\\\\\\\\PropertyInfo\\\\\\\\PropertyInfoExtractor' and 'getType' will always evaluate to true\\.#"
 		- "#Call to function method_exists\\(\\) with 'Symfony\\\\\\\\Component\\\\\\\\HttpFoundation\\\\\\\\Request' and 'getContentTypeFormat' will always evaluate to true\\.#"
 		- '#Call to an undefined method Symfony\\Component\\HttpFoundation\\Request::getContentType\(\)\.#'
 		- "#Call to function method_exists\\(\\) with 'Symfony\\\\\\\\Component\\\\\\\\Serializer\\\\\\\\Serializer' and 'getSupportedTypes' will always evaluate to true\\.#"
 		- "#Call to function method_exists\\(\\) with Symfony\\\\Component\\\\Serializer\\\\Normalizer\\\\NormalizerInterface and 'getSupportedTypes' will always evaluate to true\\.#"
 		- "#Call to function method_exists\\(\\) with Doctrine\\\\ODM\\\\MongoDB\\\\Mapping\\\\ClassMetadata\\|Doctrine\\\\ORM\\\\Mapping\\\\ClassMetadata and 'isChangeTrackingDef…' will always evaluate to true\\.#"
+		- "#Call to function method_exists\\(\\) with Symfony\\\\Component\\\\Serializer\\\\Exception\\\\PartialDenormalizationException and 'getNotNormalizableV…' will always evaluate to true\\.#"
 
-		# See https://github.com/phpstan/phpstan-symfony/issues/27
-		-
-			message: '#^Service "[^"]+" is private.$#'
-			path: src
 
 
 		# Allow extra assertions in tests: https://github.com/phpstan/phpstan-strict-rules/issues/130
@@ -182,3 +178,13 @@ parameters:
 			identifier: method.notFound
 			paths:
 				- tests/Functional/JsonStreamerTest.php
+
+		# Symfony Console 7.4 added Application::addCommand(); 8.1 removed add(). One branch is unreachable depending on installed version.
+		-
+			message: '#Call to an undefined method Symfony\\Component\\Console\\Application::(add|addCommand)\(\)\.#'
+			path: tests/Symfony/Bundle/Command/DebugResourceCommandTest.php
+			reportUnmatched: false
+		-
+			identifier: function.alreadyNarrowedType
+			path: tests/Symfony/Bundle/Command/DebugResourceCommandTest.php
+			reportUnmatched: false

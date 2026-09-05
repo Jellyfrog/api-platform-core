@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace ApiPlatform\Metadata\Tests\Extractor;
 
+use ApiPlatform\Elasticsearch\State\Options as ElasticsearchOptions;
 use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\Metadata\Delete;
 use ApiPlatform\Metadata\Extractor\XmlResourceExtractor;
@@ -142,6 +143,9 @@ final class ResourceMetadataCompatibilityTest extends TestCase
             'hydraContext' => [
                 'foo' => ['bar' => 'baz'],
             ],
+            'jsonldContext' => [
+                'dct' => 'http://purl.org/dc/terms/',
+            ],
             'openapi' => [
                 'extensionProperties' => [
                     'bar' => 'baz',
@@ -165,6 +169,7 @@ final class ResourceMetadataCompatibilityTest extends TestCase
                 ],
             ],
             'jsonStream' => true,
+            'throwOnNotFound' => true,
             'mercure' => true,
             'stateOptions' => [
                 'elasticsearchOptions' => [
@@ -356,6 +361,9 @@ final class ResourceMetadataCompatibilityTest extends TestCase
                     'hydraContext' => [
                         'foo' => ['bar' => 'baz'],
                     ],
+                    'jsonldContext' => [
+                        'dct' => 'http://purl.org/dc/terms/',
+                    ],
                     'openapi' => [
                         'extensionProperties' => [
                             'bar' => 'baz',
@@ -475,6 +483,7 @@ final class ResourceMetadataCompatibilityTest extends TestCase
         'order',
         'extraProperties',
         'jsonStream',
+        'throwOnNotFound',
     ];
     private const EXTENDED_BASE = [
         'uriTemplate',
@@ -501,6 +510,7 @@ final class ResourceMetadataCompatibilityTest extends TestCase
         'schemes',
         'cacheHeaders',
         'hydraContext',
+        'jsonldContext',
         'openapi',
         'paginationViaCursor',
         'stateOptions',
@@ -729,7 +739,15 @@ final class ResourceMetadataCompatibilityTest extends TestCase
         $configuration = reset($values);
         switch (key($values)) {
             case 'elasticsearchOptions':
-                return null;
+                // Mirrors the extractors, which only build the options when the component is installed:
+                // the expectation must not assume that api-platform/elasticsearch is absent.
+                if (!class_exists(ElasticsearchOptions::class)) {
+                    return null;
+                }
+
+                return new ElasticsearchOptions(
+                    isset($configuration['index']) ? (string) $configuration['index'] : null,
+                );
         }
 
         throw new \LogicException(\sprintf('Unsupported "%s" state options.', key($values)));

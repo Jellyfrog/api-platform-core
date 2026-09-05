@@ -52,6 +52,7 @@ final class SwaggerUiProcessor implements ProcessorInterface
             'showWebby' => $this->swaggerUiContext->isWebbyShown(),
             'swaggerUiEnabled' => $this->swaggerUiContext->isSwaggerUiEnabled(),
             'reDocEnabled' => $this->swaggerUiContext->isRedocEnabled(),
+            'scalarEnabled' => $this->swaggerUiContext->isScalarEnabled(),
             'graphQlEnabled' => $this->swaggerUiContext->isGraphQlEnabled(),
             'graphiQlEnabled' => $this->swaggerUiContext->isGraphiQlEnabled(),
             'assetPackage' => $this->swaggerUiContext->getAssetPackage(),
@@ -63,6 +64,7 @@ final class SwaggerUiProcessor implements ProcessorInterface
             'url' => $this->urlGenerator->generate('api_doc', ['format' => 'json']),
             'spec' => $this->normalizer->normalize($openApi, 'json', []),
             'persistAuthorization' => $this->openApiOptions->hasPersistAuthorization(),
+            'withCredentials' => $this->openApiOptions->getWithCredentials(),
             'oauth' => [
                 'enabled' => $this->openApiOptions->getOAuthEnabled(),
                 'type' => $this->openApiOptions->getOAuthType(),
@@ -75,6 +77,7 @@ final class SwaggerUiProcessor implements ProcessorInterface
                 'pkce' => $this->oauthPkce,
             ],
             'extraConfiguration' => $this->swaggerUiContext->getExtraConfiguration(),
+            'scalarExtraConfiguration' => $this->swaggerUiContext->getScalarExtraConfiguration(),
         ];
 
         $status = 200;

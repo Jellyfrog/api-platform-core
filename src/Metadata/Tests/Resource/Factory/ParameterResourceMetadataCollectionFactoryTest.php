@@ -323,6 +323,40 @@ class ParameterResourceMetadataCollectionFactoryTest extends TestCase
         $this->assertSame('search[related.nested]', $searchNestedParam->getKey());
     }
 
+    public function testRepeatedPropertyPlaceholderAttributesExpandPerPropertyFilter(): void
+    {
+        $nameCollection = $this->createStub(PropertyNameCollectionFactoryInterface::class);
+        $nameCollection->method('create')->willReturn(new PropertyNameCollection(['field1', 'field2', 'field3', 'field4']));
+
+        $propertyMetadata = $this->createStub(PropertyMetadataFactoryInterface::class);
+        $propertyMetadata->method('create')->willReturn(new ApiProperty(readable: true));
+
+        $filterLocator = $this->createStub(ContainerInterface::class);
+        $filterLocator->method('has')->willReturn(false);
+
+        $parameterFactory = new ParameterResourceMetadataCollectionFactory(
+            $nameCollection,
+            $propertyMetadata,
+            new AttributesResourceMetadataCollectionFactory(),
+            $filterLocator
+        );
+
+        $collection = $parameterFactory->create(HasRepeatedPropertyPlaceholderParameter::class);
+        $operation = $collection->getOperation(forceCollection: true);
+        $parameters = $operation->getParameters();
+
+        $this->assertInstanceOf(Parameters::class, $parameters);
+
+        foreach (['field1', 'field2', 'field3', 'field4'] as $field) {
+            $this->assertTrue($parameters->has($field), \sprintf('Parameter "%s" should exist after :property expansion', $field));
+        }
+
+        $this->assertInstanceOf(RepeatedPlaceholderExactFilter::class, $parameters->get('field1')->getFilter());
+        $this->assertInstanceOf(RepeatedPlaceholderExactFilter::class, $parameters->get('field2')->getFilter());
+        $this->assertInstanceOf(RepeatedPlaceholderBooleanFilter::class, $parameters->get('field3')->getFilter());
+        $this->assertInstanceOf(RepeatedPlaceholderBooleanFilter::class, $parameters->get('field4')->getFilter());
+    }
+
     private function createNestedPropertyFactory(): ParameterResourceMetadataCollectionFactory
     {
         $nameCollection = $this->createStub(PropertyNameCollectionFactoryInterface::class);
@@ -365,9 +399,9 @@ class ParameterResourceMetadataCollectionFactoryTest extends TestCase
         $this->assertNotNull($param, 'Parameter product.name should exist');
 
         $extra = $param->getExtraProperties();
-        $this->assertArrayHasKey('nested_property_info', $extra);
+        $this->assertArrayHasKey('nested_properties_info', $extra);
 
-        $info = $extra['nested_property_info'];
+        $info = $extra['nested_properties_info']['product.name'];
         $this->assertSame(['product'], $info['relation_segments']);
         $this->assertSame(['product'], $info['converted_relation_segments']);
         $this->assertSame('name', $info['leaf_property']);
@@ -386,9 +420,9 @@ class ParameterResourceMetadataCollectionFactoryTest extends TestCase
         $this->assertNotNull($param, 'Parameter product.productVariations.variantName should exist');
 
         $extra = $param->getExtraProperties();
-        $this->assertArrayHasKey('nested_property_info', $extra);
+        $this->assertArrayHasKey('nested_properties_info', $extra);
 
-        $info = $extra['nested_property_info'];
+        $info = $extra['nested_properties_info']['product.productVariations.variantName'];
         $this->assertSame(['product', 'productVariations'], $info['relation_segments']);
         $this->assertSame(['product', 'product_variations'], $info['converted_relation_segments']);
         $this->assertSame('variant_name', $info['leaf_property']);
@@ -407,9 +441,9 @@ class ParameterResourceMetadataCollectionFactoryTest extends TestCase
         $this->assertNotNull($searchProductName, 'Parameter search[product.name] should exist');
 
         $extra = $searchProductName->getExtraProperties();
-        $this->assertArrayHasKey('nested_property_info', $extra);
+        $this->assertArrayHasKey('nested_properties_info', $extra);
 
-        $info = $extra['nested_property_info'];
+        $info = $extra['nested_properties_info']['product.name'];
         $this->assertSame(['product'], $info['relation_segments']);
         $this->assertSame('name', $info['leaf_property']);
         $this->assertSame(NestedTestProduct::class, $info['leaf_class']);
@@ -424,8 +458,36 @@ class ParameterResourceMetadataCollectionFactoryTest extends TestCase
 
         $param = $parameters->get('name');
         $this->assertNotNull($param);
-        $this->assertArrayNotHasKey('nested_property_info', $param->getExtraProperties());
+        $this->assertArrayNotHasKey('nested_properties_info', $param->getExtraProperties());
     }
+}
+
+class RepeatedPlaceholderExactFilter implements FilterInterface
+{
+    public function getDescription(string $resourceClass): array
+    {
+        return [];
+    }
+}
+
+class RepeatedPlaceholderBooleanFilter implements FilterInterface
+{
+    public function getDescription(string $resourceClass): array
+    {
+        return [];
+    }
+}
+
+#[ApiResource]
+#[QueryParameter(key: ':property', filter: new RepeatedPlaceholderExactFilter(), properties: ['field1', 'field2'])]
+#[QueryParameter(key: ':property', filter: new RepeatedPlaceholderBooleanFilter(), properties: ['field3', 'field4'])]
+class HasRepeatedPropertyPlaceholderParameter
+{
+    public $id;
+    public $field1;
+    public $field2;
+    public $field3;
+    public $field4;
 }
 
 #[ApiResource(

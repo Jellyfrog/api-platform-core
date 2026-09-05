@@ -105,6 +105,9 @@ class YamlExtractorTest extends TestCase
                     'parameters' => null,
                     'jsonStream' => null,
                     'map' => null,
+                    'jsonldContext' => null,
+
+                    'throwOnNotFound' => null,
                 ],
             ],
             Program::class => [
@@ -178,6 +181,9 @@ class YamlExtractorTest extends TestCase
                     'parameters' => null,
                     'jsonStream' => null,
                     'map' => null,
+                    'jsonldContext' => null,
+
+                    'throwOnNotFound' => null,
                 ],
                 [
                     'uriTemplate' => '/users/{author}/programs{._format}',
@@ -322,6 +328,9 @@ class YamlExtractorTest extends TestCase
                             'parameters' => null,
                             'jsonStream' => null,
                             'map' => null,
+                            'jsonldContext' => null,
+
+                            'throwOnNotFound' => null,
                         ],
                         [
                             'name' => null,
@@ -409,6 +418,9 @@ class YamlExtractorTest extends TestCase
                             'parameters' => ['author' => new QueryParameter(schema: ['type' => 'string'], required: true, key: 'author', description: 'hello')],
                             'jsonStream' => null,
                             'map' => null,
+                            'jsonldContext' => null,
+
+                            'throwOnNotFound' => null,
                         ],
                     ],
                     'graphQlOperations' => null,
@@ -422,6 +434,9 @@ class YamlExtractorTest extends TestCase
                     'parameters' => null,
                     'jsonStream' => null,
                     'map' => null,
+                    'jsonldContext' => null,
+
+                    'throwOnNotFound' => null,
                 ],
             ],
             SingleFileConfigDummy::class => [
@@ -495,6 +510,9 @@ class YamlExtractorTest extends TestCase
                     'parameters' => null,
                     'jsonStream' => null,
                     'map' => null,
+                    'jsonldContext' => null,
+
+                    'throwOnNotFound' => null,
                 ],
             ],
         ], $extractor->getResources());
@@ -516,6 +534,14 @@ class YamlExtractorTest extends TestCase
         $this->assertEquals('author', $operation->getParameters()[0]->getName());
         $this->assertEquals('path', $operation->getParameters()[0]->getIn());
         $this->assertEquals('john-doe', $operation->getParameters()[0]->getExample());
+    }
+
+    public function testOpenApiParameterWithoutNameThrowsClearException(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('OpenAPI parameter is missing the required "name" key');
+
+        (new YamlResourceExtractor([__DIR__.'/yaml/openapi-parameter-without-name.yaml']))->getResources();
     }
 
     public function testInputAndOutputAreBooleans(): void

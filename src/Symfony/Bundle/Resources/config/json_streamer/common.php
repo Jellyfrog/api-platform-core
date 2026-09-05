@@ -17,24 +17,26 @@ use ApiPlatform\JsonLd\JsonStreamer\ValueTransformer\ContextValueTransformer;
 use ApiPlatform\JsonLd\JsonStreamer\ValueTransformer\IriValueTransformer;
 use ApiPlatform\JsonLd\JsonStreamer\ValueTransformer\TypeValueTransformer;
 use ApiPlatform\JsonLd\JsonStreamer\WritePropertyMetadataLoader;
+use Symfony\Bundle\FrameworkBundle\DependencyInjection\Compiler\DeprecateJsonStreamerValueTransformerTagPass;
 use Symfony\Component\JsonStreamer\CacheWarmer\LazyGhostCacheWarmer;
 use Symfony\Component\JsonStreamer\JsonStreamReader;
 use Symfony\Component\JsonStreamer\JsonStreamWriter;
 use Symfony\Component\JsonStreamer\StreamerDumper;
+use Symfony\Component\JsonStreamer\Transformer\DateTimeValueObjectTransformer;
 
 return static function (ContainerConfigurator $container) {
     $services = $container->services();
 
     $services->set('api_platform.jsonld.json_streamer.stream_writer', JsonStreamWriter::class)
         ->args([
-            tagged_locator('json_streamer.value_transformer'),
+            tagged_locator('json_streamer.value_transformer', 'key'),
             service('api_platform.jsonld.json_streamer.write.property_metadata_loader'),
             '%.json_streamer.stream_writers_dir.jsonld%',
             service('config_cache_factory')->ignoreOnInvalid(),
         ]);
 
     $jsonStreamReaderArgs = [
-        tagged_locator('json_streamer.value_transformer'),
+        tagged_locator('json_streamer.value_transformer', 'key'),
         service('json_streamer.read.property_metadata_loader'),
         '%.json_streamer.stream_readers_dir.jsonld%',
     ];
@@ -75,4 +77,10 @@ return static function (ContainerConfigurator $container) {
     $services->set('api_platform.jsonld.json_streamer.write.value_transformer.context', ContextValueTransformer::class)
         ->args([service('api_platform.router')])
         ->tag('json_streamer.value_transformer');
+
+    // FrameworkBundle 8.1+ registers DateTimeValueObjectTransformer itself; skip to avoid duplicate registration and TransformerPass validation breakage (issue #7954).
+    if (class_exists(DateTimeValueObjectTransformer::class) && !class_exists(DeprecateJsonStreamerValueTransformerTagPass::class)) {
+        $services->set('api_platform.jsonld.json_streamer.value_transformer.date_time', DateTimeValueObjectTransformer::class)
+            ->tag('json_streamer.value_object_transformer');
+    }
 };

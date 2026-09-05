@@ -36,6 +36,10 @@ return function (ContainerConfigurator $container) {
         ->decorate('api_platform.serializer.normalizer.item', null, 0)
         ->args([service('api_platform.elasticsearch.normalizer.item.inner')]);
 
+    $services->set('api_platform.elasticsearch.denormalizer.item', ItemNormalizer::class)
+        ->decorate('api_platform.serializer.denormalizer.item', null, 0)
+        ->args([service('api_platform.elasticsearch.denormalizer.item.inner')]);
+
     $services->set('api_platform.elasticsearch.normalizer.document', DocumentNormalizer::class)
         ->args([
             service('api_platform.metadata.resource.metadata_collection_factory'),
@@ -46,6 +50,7 @@ return function (ContainerConfigurator $container) {
             service('serializer.mapping.class_discriminator_resolver')->ignoreOnInvalid(),
             null,
             '%api_platform.serializer.default_context%',
+            service('api_platform.metadata.property.metadata_factory'),
         ])
         ->tag('serializer.normalizer', ['priority' => -922]);
 

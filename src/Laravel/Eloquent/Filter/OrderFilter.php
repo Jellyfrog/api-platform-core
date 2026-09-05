@@ -16,13 +16,14 @@ namespace ApiPlatform\Laravel\Eloquent\Filter;
 use ApiPlatform\Metadata\JsonSchemaFilterInterface;
 use ApiPlatform\Metadata\OpenApiParameterFilterInterface;
 use ApiPlatform\Metadata\Parameter;
+use ApiPlatform\Metadata\SortFilterInterface;
 use ApiPlatform\OpenApi\Model\Parameter as OpenApiParameter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOneOrMany;
 
-final class OrderFilter implements FilterInterface, JsonSchemaFilterInterface, OpenApiParameterFilterInterface
+final class OrderFilter implements FilterInterface, JsonSchemaFilterInterface, OpenApiParameterFilterInterface, SortFilterInterface
 {
     use QueryPropertyTrait;
 
@@ -45,12 +46,13 @@ final class OrderFilter implements FilterInterface, JsonSchemaFilterInterface, O
             return $builder;
         }
 
-        $direction = strtoupper($values);
-        if (!\in_array($direction, ['ASC', 'DESC'], true)) {
+        $direction = strtolower($values);
+        if (!\in_array($direction, ['asc', 'desc'], true)) {
             return $builder;
         }
 
-        $nestedInfo = $parameter->getExtraProperties()['nested_property_info'] ?? null;
+        $nestedPropertiesInfo = $parameter->getExtraProperties()['nested_properties_info'] ?? [];
+        $nestedInfo = $nestedPropertiesInfo ? reset($nestedPropertiesInfo) : null;
 
         if (!$nestedInfo || 0 === \count($nestedInfo['relation_segments'])) {
             return $builder->orderBy($this->getQueryProperty($parameter), $direction);

@@ -23,13 +23,10 @@ use ApiPlatform\Metadata\UrlGeneratorInterface;
 use ApiPlatform\Metadata\Util\ClassInfoTrait;
 use ApiPlatform\Metadata\Util\TypeHelper;
 use ApiPlatform\Serializer\AbstractItemNormalizer;
-use ApiPlatform\Serializer\CacheKeyTrait;
 use ApiPlatform\Serializer\ContextTrait;
 use ApiPlatform\Serializer\OperationResourceClassResolverInterface;
 use ApiPlatform\Serializer\TagCollectorInterface;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
-use Symfony\Component\PropertyInfo\Type as LegacyType;
 use Symfony\Component\Serializer\Exception\CircularReferenceException;
 use Symfony\Component\Serializer\Exception\LogicException;
 use Symfony\Component\Serializer\Exception\UnexpectedValueException;
@@ -49,7 +46,6 @@ use Symfony\Component\TypeInfo\Type\ObjectType;
  */
 final class ItemNormalizer extends AbstractItemNormalizer
 {
-    use CacheKeyTrait;
     use ClassInfoTrait;
     use ContextTrait;
 
@@ -113,7 +109,7 @@ final class ItemNormalizer extends AbstractItemNormalizer
         $context['api_normalize'] = true;
 
         if (!isset($context['cache_key'])) {
-            $context['cache_key'] = $this->getCacheKey($format, $context);
+            $context['cache_key'] = $this->isCacheKeySafe($context) ? $this->getCacheKey($format, $context) : false;
         }
 
         $normalizedData = parent::normalize($data, $format, $context);
@@ -186,14 +182,10 @@ final class ItemNormalizer extends AbstractItemNormalizer
         foreach ($attributes as $attribute) {
             $propertyMetadata = $this->propertyMetadataFactory->create($context['resource_class'], $attribute, $options);
 
-            if (method_exists(PropertyInfoExtractor::class, 'getType')) {
-                $type = $propertyMetadata->getNativeType();
-                $types = $type instanceof CompositeTypeInterface ? $type->getTypes() : (null === $type ? [] : [$type]);
-                /** @var class-string|null $className */
-                $className = null;
-            } else {
-                $types = $propertyMetadata->getBuiltinTypes() ?? [];
-            }
+            $type = $propertyMetadata->getNativeType();
+            $types = $type instanceof CompositeTypeInterface ? $type->getTypes() : (null === $type ? [] : [$type]);
+            /** @var class-string|null $className */
+            $className = null;
 
             // prevent declaring $attribute as attribute if it's already declared as relationship
             $isRelationship = false;
@@ -204,23 +196,10 @@ final class ItemNormalizer extends AbstractItemNormalizer
             foreach ($types as $type) {
                 $isOne = $isMany = false;
 
-                /** @var Type|LegacyType|null $valueType */
-                $valueType = null;
-
-                if ($type instanceof LegacyType) {
-                    if ($type->isCollection()) {
-                        $valueType = $type->getCollectionValueTypes()[0] ?? null;
-                        $isMany = null !== $valueType && ($className = $valueType->getClassName()) && $this->resourceClassResolver->isResourceClass($className);
-                    } else {
-                        $className = $type->getClassName();
-                        $isOne = $className && $this->resourceClassResolver->isResourceClass($className);
-                    }
-                } elseif ($type instanceof Type) {
-                    if ($type->isSatisfiedBy(static fn ($t) => $t instanceof CollectionType)) {
-                        $isMany = TypeHelper::getCollectionValueType($type)?->isSatisfiedBy($typeIsResourceClass);
-                    } else {
-                        $isOne = $type->isSatisfiedBy($typeIsResourceClass);
-                    }
+                if ($type->isSatisfiedBy(static fn ($t) => $t instanceof CollectionType)) {
+                    $isMany = TypeHelper::getCollectionValueType($type)?->isSatisfiedBy($typeIsResourceClass);
+                } else {
+                    $isOne = $type->isSatisfiedBy($typeIsResourceClass);
                 }
 
                 if (!$isOne && !$isMany) {

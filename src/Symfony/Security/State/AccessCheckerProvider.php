@@ -73,24 +73,32 @@ final class AccessCheckerProvider implements ProviderInterface
         if ($operation instanceof HttpOperation) {
             $request = $context['request'] ?? null;
 
+            // URI variables are exposed to the expression (e.g. is_granted('VIEW', user_id)); reserved keys below must win on collision.
             $resourceAccessCheckerContext = [
                 'object' => $body,
                 'previous_object' => $request?->attributes->get('previous_data'),
                 'request' => $request,
-            ];
+            ] + $uriVariables;
         } else {
             $resourceAccessCheckerContext = [
                 'object' => $body,
                 'previous_object' => $context['graphql_context']['previous_object'] ?? null,
-            ];
+            ] + $uriVariables;
         }
 
-        if ('pre_read' === $this->event && $this->resourceAccessChecker instanceof ObjectVariableCheckerInterface && $this->resourceAccessChecker->usesObjectVariable($isGranted, $resourceAccessCheckerContext)) {
+        // Skip pre_read optimization when object is used via granted (or usage is not predicatable)
+        if (
+            'pre_read' === $this->event
+            && (
+                !$this->resourceAccessChecker instanceof ObjectVariableCheckerInterface
+                || $this->resourceAccessChecker->usesObjectVariable($isGranted, $resourceAccessCheckerContext)
+            )
+        ) {
             return $this->decorated->provide($operation, $uriVariables, $context);
         }
 
         if (!$this->resourceAccessChecker->isGranted($operation->getClass(), $isGranted, $resourceAccessCheckerContext)) {
-            $operation instanceof GraphQlOperation ? throw new AccessDeniedHttpException($message ?? 'Access Denied.') : throw new AccessDeniedException($message ?? 'Access Denied.');
+            $operation instanceof GraphQlOperation ? throw new AccessDeniedHttpException($message ?? 'Access Denied.') : throw new AccessDeniedException($message ?? 'Access Denied.', null, 403, false);
         }
 
         return 'pre_read' === $this->event ? $this->decorated->provide($operation, $uriVariables, $context) : $body;

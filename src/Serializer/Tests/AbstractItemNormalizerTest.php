@@ -37,7 +37,10 @@ use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\Dummy;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\DummyTableInheritance;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\DummyTableInheritanceChild;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\DummyTableInheritanceRelated;
+use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\DummyWithMultipleRequiredConstructorArgs;
+use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\DummyWithNullableConstructorArg;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\NonCloneableDummy;
+use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\NotificationType;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\PropertyCollectionIriOnly;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\PropertyCollectionIriOnlyRelation;
 use ApiPlatform\Serializer\Tests\Fixtures\ApiResource\RelatedDummy;
@@ -49,8 +52,7 @@ use Prophecy\Argument;
 use Prophecy\PhpUnit\ProphecyTrait;
 use Symfony\Component\PropertyAccess\PropertyAccessor;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
-use Symfony\Component\PropertyInfo\Type as LegacyType;
+use Symfony\Component\Serializer\Exception\MissingConstructorArgumentsException;
 use Symfony\Component\Serializer\Exception\NotNormalizableValueException;
 use Symfony\Component\Serializer\Exception\UnexpectedValueException;
 use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
@@ -88,7 +90,7 @@ class AbstractItemNormalizerTest extends TestCase
         $this->assertTrue($normalizer->supportsDenormalization($dummy, Dummy::class));
         $this->assertFalse($normalizer->supportsDenormalization($std, \stdClass::class));
         $this->assertFalse($normalizer->supportsNormalization([]));
-        $this->assertSame(['object' => true], $normalizer->getSupportedTypes('any'));
+        $this->assertSame(['object' => false], $normalizer->getSupportedTypes('any'));
     }
 
     public function testNormalize(): void
@@ -107,26 +109,14 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'alias', 'relatedDummy', 'relatedDummies']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(true)->withWritable(false)->withReadableLink(false));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(false));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/dummies/1');
@@ -165,6 +155,51 @@ class AbstractItemNormalizerTest extends TestCase
         ]));
     }
 
+    public function testNormalizeNullableToManyRelationReturnsNull(): void
+    {
+        $dummy = new Dummy();
+        $dummy->setName('foo');
+
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'relatedDummies']));
+
+        $relatedDummiesType = Type::nullable(Type::collection(Type::object(ArrayCollection::class), Type::object(RelatedDummy::class), Type::int()));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(false));
+
+        $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
+        $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/dummies/1');
+
+        $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
+        $propertyAccessorProphecy->getValue($dummy, 'name')->willReturn('foo');
+        $propertyAccessorProphecy->getValue($dummy, 'relatedDummies')->willReturn(null);
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->getResourceClass(null, Dummy::class)->willReturn(Dummy::class);
+        $resourceClassResolverProphecy->getResourceClass($dummy, null)->willReturn(Dummy::class);
+        $resourceClassResolverProphecy->isResourceClass(Dummy::class)->willReturn(true);
+        $resourceClassResolverProphecy->isResourceClass(RelatedDummy::class)->willReturn(true);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(NormalizerInterface::class);
+        $serializerProphecy->normalize('foo', null, Argument::type('array'))->willReturn('foo');
+        $serializerProphecy->normalize(null, null, Argument::type('array'))->willReturn(null);
+
+        $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        $expected = [
+            'name' => 'foo',
+            'relatedDummies' => null,
+        ];
+        $this->assertSame($expected, $normalizer->normalize($dummy, null, [
+            'resources' => [],
+            'skip_null_values' => false,
+        ]));
+    }
+
     public function testNormalizeWithSecuredProperty(): void
     {
         $dummy = new SecuredDummy();
@@ -176,14 +211,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/secured_dummies/1');
@@ -219,6 +248,104 @@ class AbstractItemNormalizerTest extends TestCase
         ]));
     }
 
+    public function testIsCacheKeySafeReturnsFalseWhenAPropertyHasSecurity(): void
+    {
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(SecuredDummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['title', 'adminOnlyProperty']));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->isResourceClass(SecuredDummy::class)->willReturn(true);
+        $resourceClassResolverProphecy->getResourceClass(null, SecuredDummy::class)->willReturn(SecuredDummy::class);
+
+        $normalizer = $this->createCacheKeySafeProbe(
+            $propertyNameCollectionFactoryProphecy->reveal(),
+            $propertyMetadataFactoryProphecy->reveal(),
+            $resourceClassResolverProphecy->reveal()
+        );
+
+        $this->assertFalse($normalizer->probeIsCacheKeySafe(['resource_class' => SecuredDummy::class]));
+    }
+
+    public function testIsCacheKeySafeReturnsTrueWhenNoPropertyHasSecurity(): void
+    {
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'alias']));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withReadable(true));
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->isResourceClass(Dummy::class)->willReturn(true);
+        $resourceClassResolverProphecy->getResourceClass(null, Dummy::class)->willReturn(Dummy::class);
+
+        $normalizer = $this->createCacheKeySafeProbe(
+            $propertyNameCollectionFactoryProphecy->reveal(),
+            $propertyMetadataFactoryProphecy->reveal(),
+            $resourceClassResolverProphecy->reveal()
+        );
+
+        $this->assertTrue($normalizer->probeIsCacheKeySafe(['resource_class' => Dummy::class]));
+    }
+
+    public function testIsCacheKeySafeReturnsFalseWithoutResourceClass(): void
+    {
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->isResourceClass(\stdClass::class)->willReturn(false);
+
+        $normalizer = $this->createCacheKeySafeProbe(
+            $this->prophesize(PropertyNameCollectionFactoryInterface::class)->reveal(),
+            $this->prophesize(PropertyMetadataFactoryInterface::class)->reveal(),
+            $resourceClassResolverProphecy->reveal()
+        );
+
+        $this->assertFalse($normalizer->probeIsCacheKeySafe([]));
+        $this->assertFalse($normalizer->probeIsCacheKeySafe(['resource_class' => \stdClass::class]));
+    }
+
+    public function testIsCacheKeySafeCachesPerResourceClass(): void
+    {
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(SecuredDummy::class, Argument::type('array'))
+            ->shouldBeCalledOnce()
+            ->willReturn(new PropertyNameCollection(['adminOnlyProperty']));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))
+            ->shouldBeCalledOnce()
+            ->willReturn((new ApiProperty())->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->isResourceClass(SecuredDummy::class)->willReturn(true);
+        $resourceClassResolverProphecy->getResourceClass(null, SecuredDummy::class)->willReturn(SecuredDummy::class);
+
+        $normalizer = $this->createCacheKeySafeProbe(
+            $propertyNameCollectionFactoryProphecy->reveal(),
+            $propertyMetadataFactoryProphecy->reveal(),
+            $resourceClassResolverProphecy->reveal()
+        );
+
+        $this->assertFalse($normalizer->probeIsCacheKeySafe(['resource_class' => SecuredDummy::class]));
+        $this->assertFalse($normalizer->probeIsCacheKeySafe(['resource_class' => SecuredDummy::class]));
+    }
+
+    private function createCacheKeySafeProbe(
+        PropertyNameCollectionFactoryInterface $propertyNameCollectionFactory,
+        PropertyMetadataFactoryInterface $propertyMetadataFactory,
+        ResourceClassResolverInterface $resourceClassResolver,
+    ): object {
+        return new class($propertyNameCollectionFactory, $propertyMetadataFactory, $this->prophesize(IriConverterInterface::class)->reveal(), $resourceClassResolver, $this->prophesize(PropertyAccessorInterface::class)->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {
+            public function probeIsCacheKeySafe(array $context): bool
+            {
+                return $this->isCacheKeySafe($context);
+            }
+        };
+    }
+
     public function testNormalizePropertyAsIriWithUriTemplate(): void
     {
         $propertyCollectionIriOnlyRelation = new PropertyCollectionIriOnlyRelation();
@@ -245,34 +372,15 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'propertyCollectionIriOnlyRelation', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/property-collection-relations')->withBuiltinTypes([
-                    new LegacyType('iterable', false, null, true, new LegacyType('int', false, null, false), new LegacyType('object', false, PropertyCollectionIriOnlyRelation::class, false)),
-                ])
-            );
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'iterableIri', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations')->withBuiltinTypes([
-                    new LegacyType('iterable', false, null, true, new LegacyType('int', false, null, false), new LegacyType('object', false, PropertyCollectionIriOnlyRelation::class, false)),
-                ])
-            );
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'toOneRelation', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations/{id}')->withBuiltinTypes([
-                    new LegacyType('object', false, PropertyCollectionIriOnlyRelation::class, false),
-                ])
-            );
-        } else {
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'propertyCollectionIriOnlyRelation', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/property-collection-relations')->withNativeType(Type::list(Type::object(PropertyCollectionIriOnlyRelation::class)))
-            );
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'iterableIri', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations')->withNativeType(Type::iterable(Type::object(PropertyCollectionIriOnlyRelation::class)))
-            );
-            $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'toOneRelation', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations/{id}')->withNativeType(Type::object(PropertyCollectionIriOnlyRelation::class))
-            );
-        }
+        $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'propertyCollectionIriOnlyRelation', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withReadable(true)->withUriTemplate('/property-collection-relations')->withNativeType(Type::list(Type::object(PropertyCollectionIriOnlyRelation::class)))
+        );
+        $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'iterableIri', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations')->withNativeType(Type::iterable(Type::object(PropertyCollectionIriOnlyRelation::class)))
+        );
+        $propertyMetadataFactoryProphecy->create(PropertyCollectionIriOnly::class, 'toOneRelation', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withReadable(true)->withUriTemplate('/parent/{parentId}/another-collection-operations/{id}')->withNativeType(Type::object(PropertyCollectionIriOnlyRelation::class))
+        );
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($propertyCollectionIriOnly, UrlGeneratorInterface::ABS_URL, null, Argument::any())->willReturn('/property-collection-relations', '/parent/42/another-collection-operations');
@@ -327,13 +435,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')')->withExtraProperties(['throw_on_access_denied' => true]));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')')->withExtraProperties(['throw_on_access_denied' => true]));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')')->withExtraProperties(['throw_on_access_denied' => true]));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -380,13 +483,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -437,13 +535,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurityPostDenormalize('is_granted(\'ROLE_ADMIN\')'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -495,14 +588,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'adminOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withSecurity('is_granted(\'ROLE_ADMIN\')'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -545,14 +632,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false')->withDefault(''));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false')->withDefault(''));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false')->withDefault(''));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -598,14 +679,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('true'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('true'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('true'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -658,14 +733,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('false'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('false'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurity('false'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -718,14 +787,8 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false'));
-        } else {
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false'));
-        }
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(SecuredDummy::class, 'ownerOnlyProperty', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true)->withWritable(true)->withSecurityPostDenormalize('false'));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -773,22 +836,12 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['relatedDummy', 'relatedDummies']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withReadable(true)->withWritable(false)->withReadableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(true)->withWritable(false)->withReadableLink(true));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(true)->withWritable(false)->withReadableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(true));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(true)->withWritable(false)->withReadableLink(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/dummies/1');
@@ -841,20 +894,11 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(DummyTableInheritanceRelated::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['children']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $abstractDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, DummyTableInheritance::class);
-            $abstractDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $abstractDummyType);
+        $abstractDummyType = Type::object(DummyTableInheritance::class);
+        $abstractDummiesType = Type::collection(Type::object(ArrayCollection::class), $abstractDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(DummyTableInheritanceRelated::class, 'children', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$abstractDummiesType])->withReadable(true)->withWritable(false)->withReadableLink(true));
-        } else {
-            $abstractDummyType = Type::object(DummyTableInheritance::class);
-            $abstractDummiesType = Type::collection(Type::object(ArrayCollection::class), $abstractDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(DummyTableInheritanceRelated::class, 'children', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($abstractDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(true));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(DummyTableInheritanceRelated::class, 'children', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($abstractDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/dummies/1');
@@ -904,26 +948,14 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'relatedDummy', 'relatedDummies']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
 
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getResourceFromIri('/dummies/1', Argument::type('array'))->willReturn($relatedDummy1);
@@ -1026,30 +1058,16 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'relatedDummy', 'relatedDummies', 'relatedDummiesWithUnionTypes']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
-            $relatedDummiesWithUnionTypesIntType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
-            $relatedDummiesWithUnionTypesFloatType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
+        $relatedDummiesWithUnionTypesIntType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
+        $relatedDummiesWithUnionTypesFloatType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::float());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummiesWithUnionTypes', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesWithUnionTypesIntType, $relatedDummiesWithUnionTypesFloatType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-            $relatedDummiesWithUnionTypesIntType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-            $relatedDummiesWithUnionTypesFloatType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::float());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummiesWithUnionTypes', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::union($relatedDummiesWithUnionTypesIntType, $relatedDummiesWithUnionTypesFloatType))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummiesWithUnionTypes', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::union($relatedDummiesWithUnionTypesIntType, $relatedDummiesWithUnionTypesFloatType))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1082,6 +1100,281 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyAccessorProphecy->setValue($actual, 'relatedDummiesWithUnionTypes', [0 => $relatedDummy3, 1 => $relatedDummy4])->shouldHaveBeenCalled();
     }
 
+    public function testUnionTypeDenormalizationFallsThroughAfterTypeConfusionGuardMismatch(): void
+    {
+        $data = ['relatedDummyUnion' => '/related_dummies/1'];
+        $relatedDummy = new RelatedDummy();
+
+        $propertyNameCollectionFactory = $this->createStub(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactory->method('create')->willReturn(new PropertyNameCollection(['relatedDummyUnion']));
+
+        // Dummy is the mismatching member tried first; RelatedDummy is the one that actually matches.
+        $propertyMetadataFactory = $this->createStub(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturn(
+            (new ApiProperty())
+                ->withNativeType(Type::union(Type::object(Dummy::class), Type::object(RelatedDummy::class)))
+                ->withWritable(true)->withWritableLink(true)
+        );
+
+        // Always resolves to a RelatedDummy, no matter which type of the union is being attempted.
+        $iriConverter = $this->createStub(IriConverterInterface::class);
+        $iriConverter->method('getResourceFromIri')->willReturn($relatedDummy);
+
+        $resourceClassResolver = $this->createStub(ResourceClassResolverInterface::class);
+        $resourceClassResolver->method('isResourceClass')->willReturnMap([
+            [Dummy::class, true],
+            [RelatedDummy::class, true],
+        ]);
+        $resourceClassResolver->method('getResourceClass')->willReturnMap([
+            [null, Dummy::class, Dummy::class],
+            [null, RelatedDummy::class, RelatedDummy::class],
+        ]);
+
+        $propertyAccessor = $this->createMock(PropertyAccessorInterface::class);
+        $propertyAccessor->expects($this->once())
+            ->method('setValue')
+            ->with($this->isInstanceOf(Dummy::class), 'relatedDummyUnion', $relatedDummy);
+
+        $serializer = $this->createStub(SerializerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactory, $propertyMetadataFactory, $iriConverter, $resourceClassResolver, $propertyAccessor, null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializer);
+
+        // The first union member (Dummy) should correctly fail and we expect to fallback to the second
+        // member (RelatedDummy).
+        $actual = $normalizer->denormalize($data, Dummy::class);
+
+        $this->assertInstanceOf(Dummy::class, $actual);
+    }
+
+    public function testUnionTypeCollectionDenormalizationAcceptsAnyMember(): void
+    {
+        $data = ['attachments' => ['/related_dummies/1']];
+        $relatedDummy = new RelatedDummy();
+
+        $propertyNameCollectionFactory = $this->createStub(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactory->method('create')->willReturn(new PropertyNameCollection(['attachments']));
+
+        // array<Dummy|RelatedDummy>: the collection value type is a union; the IRI points to the second member.
+        $propertyMetadataFactory = $this->createStub(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturn(
+            (new ApiProperty())
+                ->withNativeType(Type::list(Type::union(Type::object(Dummy::class), Type::object(RelatedDummy::class))))
+                ->withWritable(true)
+        );
+
+        $iriConverter = $this->createStub(IriConverterInterface::class);
+        $iriConverter->method('getResourceFromIri')->willReturn($relatedDummy);
+
+        $resourceClassResolver = $this->createStub(ResourceClassResolverInterface::class);
+        $resourceClassResolver->method('isResourceClass')->willReturnMap([
+            [Dummy::class, true],
+            [RelatedDummy::class, true],
+        ]);
+        $resourceClassResolver->method('getResourceClass')->willReturnMap([
+            [null, Dummy::class, Dummy::class],
+            [null, RelatedDummy::class, RelatedDummy::class],
+        ]);
+
+        $propertyAccessor = $this->createMock(PropertyAccessorInterface::class);
+        $propertyAccessor->expects($this->once())
+            ->method('setValue')
+            ->with($this->isInstanceOf(Dummy::class), 'attachments', [0 => $relatedDummy]);
+
+        $serializer = $this->createStub(SerializerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactory, $propertyMetadataFactory, $iriConverter, $resourceClassResolver, $propertyAccessor, null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializer);
+
+        $actual = $normalizer->denormalize($data, Dummy::class);
+
+        $this->assertInstanceOf(Dummy::class, $actual);
+    }
+
+    public function testDenormalizeNullableCollectionOfBackedEnums(): void
+    {
+        $data = ['notificationType' => ['email']];
+
+        $propertyNameCollectionFactory = $this->createStub(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactory->method('create')->willReturn(new PropertyNameCollection(['notificationType']));
+
+        // Mirrors what Symfony\Bridge\Doctrine\PropertyInfo\DoctrineExtractor produces for a nullable
+        // Doctrine SIMPLE_ARRAY column mapped with "enumType": both the collection and its value type
+        // end up wrapped in a NullableType.
+        $propertyMetadataFactory = $this->createStub(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturn(
+            (new ApiProperty())
+                ->withNativeType(Type::nullable(Type::list(Type::nullable(Type::enum(NotificationType::class)))))
+                ->withWritable(true)
+        );
+
+        $resourceClassResolver = $this->createStub(ResourceClassResolverInterface::class);
+        $resourceClassResolver->method('isResourceClass')->willReturnMap([
+            [Dummy::class, true],
+            [NotificationType::class, false],
+        ]);
+        $resourceClassResolver->method('getResourceClass')->willReturnMap([
+            [null, Dummy::class, Dummy::class],
+        ]);
+
+        $propertyAccessor = $this->createMock(PropertyAccessorInterface::class);
+        $propertyAccessor->expects($this->once())
+            ->method('setValue')
+            ->with($this->isInstanceOf(Dummy::class), 'notificationType', [NotificationType::Email]);
+
+        $iriConverter = $this->createStub(IriConverterInterface::class);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(DenormalizerInterface::class);
+        $serializerProphecy->denormalize(['email'], NotificationType::class.'[]', null, Argument::type('array'))->willReturn([NotificationType::Email]);
+
+        $normalizer = new class($propertyNameCollectionFactory, $propertyMetadataFactory, $iriConverter, $resourceClassResolver, $propertyAccessor, null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        $actual = $normalizer->denormalize($data, Dummy::class);
+
+        $this->assertInstanceOf(Dummy::class, $actual);
+    }
+
+    public function testDenormalizeWrongTypedValueForNullableObjectPropertyPreservesNormalizerException(): void
+    {
+        // What Symfony's DateTimeNormalizer throws for a value it cannot parse.
+        $normalizerException = NotNormalizableValueException::createForUnexpectedDataType('The data is either not an string, an empty string, or null; you should pass a string that can be parsed with the passed format or a valid DateTime string.', false, ['string'], 'dummyDate', true);
+
+        $normalizer = $this->createNormalizerForObjectProperty('dummyDate', Type::nullable(Type::object(\DateTimeImmutable::class)), \DateTimeImmutable::class, $normalizerException);
+
+        try {
+            $normalizer->denormalize(['dummyDate' => false], Dummy::class);
+            $this->fail('Expected a NotNormalizableValueException to be thrown.');
+        } catch (NotNormalizableValueException $exception) {
+            $this->assertSame(['string', 'null'], $exception->getExpectedTypes());
+            $this->assertTrue($exception->canUseMessageForUser());
+            $this->assertSame($normalizerException->getMessage(), $exception->getMessage());
+            $this->assertSame('dummyDate', $exception->getPath());
+        }
+    }
+
+    public function testDenormalizeWrongTypedValueForNonNullableObjectPropertyPreservesNormalizerException(): void
+    {
+        $normalizerException = NotNormalizableValueException::createForUnexpectedDataType('The data is either not an string, an empty string, or null; you should pass a string that can be parsed with the passed format or a valid DateTime string.', false, ['string'], 'dummyDate', true);
+
+        $normalizer = $this->createNormalizerForObjectProperty('dummyDate', Type::object(\DateTimeImmutable::class), \DateTimeImmutable::class, $normalizerException);
+
+        try {
+            $normalizer->denormalize(['dummyDate' => false], Dummy::class);
+            $this->fail('Expected a NotNormalizableValueException to be thrown.');
+        } catch (NotNormalizableValueException $exception) {
+            $this->assertSame(['string'], $exception->getExpectedTypes());
+            $this->assertTrue($exception->canUseMessageForUser());
+            $this->assertSame($normalizerException->getMessage(), $exception->getMessage());
+            $this->assertSame('dummyDate', $exception->getPath());
+        }
+    }
+
+    private function createNormalizerForObjectProperty(string $attribute, Type $nativeType, string $className, NotNormalizableValueException $normalizerException): AbstractItemNormalizer
+    {
+        $propertyNameCollectionFactory = $this->createStub(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactory->method('create')->willReturn(new PropertyNameCollection([$attribute]));
+
+        $propertyMetadataFactory = $this->createStub(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturn(
+            (new ApiProperty())
+                ->withNativeType($nativeType)
+                ->withWritable(true)
+        );
+
+        $resourceClassResolver = $this->createStub(ResourceClassResolverInterface::class);
+        $resourceClassResolver->method('isResourceClass')->willReturnMap([
+            [Dummy::class, true],
+            [$className, false],
+        ]);
+        $resourceClassResolver->method('getResourceClass')->willReturnMap([
+            [null, Dummy::class, Dummy::class],
+        ]);
+
+        $propertyAccessor = $this->createStub(PropertyAccessorInterface::class);
+        $iriConverter = $this->createStub(IriConverterInterface::class);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(DenormalizerInterface::class);
+        $serializerProphecy->denormalize(false, $className, null, Argument::type('array'))->willThrow($normalizerException);
+
+        $normalizer = new class($propertyNameCollectionFactory, $propertyMetadataFactory, $iriConverter, $resourceClassResolver, $propertyAccessor, null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        return $normalizer;
+    }
+
+    public function testTypeConfusionGuardPreservesPathAndExpectedType(): void
+    {
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+
+        // The IRI resolves to a Dummy while a RelatedDummy is expected: the type-confusion guard must reject it.
+        $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
+        $iriConverterProphecy->getResourceFromIri(Argument::cetera())->willReturn(new Dummy());
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->getResourceClass(null, RelatedDummy::class)->willReturn(RelatedDummy::class);
+        $resourceClassResolverProphecy->isResourceClass(RelatedDummy::class)->willReturn(true);
+
+        $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(DenormalizerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        try {
+            $normalizer->denormalize('/dummies/1', RelatedDummy::class, null, [
+                'not_normalizable_value_exceptions' => [],
+                'deserialization_path' => 'relatedDummy',
+            ]);
+            $this->fail('Expected a NotNormalizableValueException to be thrown.');
+        } catch (NotNormalizableValueException $exception) {
+            $this->assertSame('Invalid IRI "/dummies/1".', $exception->getMessage());
+            $this->assertSame('relatedDummy', $exception->getPath());
+            $this->assertSame([RelatedDummy::class], $exception->getExpectedTypes());
+        }
+    }
+
+    public function testTypeConfusionGuardReportsAllUnionMemberTypes(): void
+    {
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+
+        // The IRI resolves to a Dummy while the relation is declared as RelatedDummy|SecuredDummy.
+        $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
+        $iriConverterProphecy->getResourceFromIri(Argument::cetera())->willReturn(new Dummy());
+
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->getResourceClass(null, RelatedDummy::class)->willReturn(RelatedDummy::class);
+        $resourceClassResolverProphecy->isResourceClass(RelatedDummy::class)->willReturn(true);
+
+        $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(DenormalizerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        try {
+            $normalizer->denormalize('/dummies/1', RelatedDummy::class, null, [
+                'not_normalizable_value_exceptions' => [],
+                'deserialization_path' => 'relation',
+                'relation_native_type' => Type::union(Type::object(RelatedDummy::class), Type::object(SecuredDummy::class)),
+            ]);
+            $this->fail('Expected a NotNormalizableValueException to be thrown.');
+        } catch (NotNormalizableValueException $exception) {
+            // A union relation must report every accepted class, not just the first one attempted.
+            $this->assertSame([RelatedDummy::class, SecuredDummy::class], $exception->getExpectedTypes());
+        }
+    }
+
     public function testDenormalizeRelationNotFoundReturnsNull(): void
     {
         $data = [
@@ -1091,18 +1384,10 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['relatedDummy']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
+        $relatedDummyType = Type::object(RelatedDummy::class);
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getResourceFromIri('/dummies/not_found', Argument::type('array'))->willThrow(new ItemNotFoundException());
@@ -1144,16 +1429,9 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class)])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
+        );
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1185,16 +1463,9 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class)])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
+        );
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1228,16 +1499,9 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, null, new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class))])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true)
-            );
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withNativeType(Type::collection(Type::object(ArrayCollection::class), Type::object(RelatedDummy::class)))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true)
-            );
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withNativeType(Type::collection(Type::object(ArrayCollection::class), Type::object(RelatedDummy::class)))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true)
+        );
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getResourceFromIri(Argument::cetera())->willThrow(new InvalidArgumentException('Invalid IRI'));
@@ -1251,7 +1515,6 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
 
         $serializerProphecy = $this->prophesize(SerializerInterface::class);
-        $serializerProphecy->willImplement(DenormalizerInterface::class);
 
         $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
         $normalizer->setSerializer($serializerProphecy->reveal());
@@ -1335,16 +1598,9 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class)])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
-                (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
-            );
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn(
+            (new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false)
+        );
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1379,12 +1635,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1414,12 +1665,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1453,12 +1699,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'foo', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1508,27 +1749,11 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class)])->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
-            $type = new LegacyType(
-                LegacyType::BUILTIN_TYPE_OBJECT,
-                false,
-                ArrayCollection::class,
-                true,
-                new LegacyType(LegacyType::BUILTIN_TYPE_INT),
-                new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class)
-            );
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$type])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::object(RelatedDummy::class))->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-
-            $type = Type::collection(Type::object(ArrayCollection::class), Type::object(RelatedDummy::class), Type::int());
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($type)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        }
+        $type = Type::collection(Type::object(ArrayCollection::class), Type::object(RelatedDummy::class), Type::int());
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($type)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1560,12 +1785,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING, true)])->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        } else {
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::nullable(Type::string()))->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
-        }
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::nullable(Type::string()))->withDescription('')->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1608,34 +1828,18 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue1', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_BOOL)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse1', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_BOOL)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue2', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_BOOL)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse2', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_BOOL)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int1', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_INT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int2', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_INT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float1', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float2', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float3', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNaN', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatInf', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNegInf', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_FLOAT)])->withDescription('')->withReadable(false)->withWritable(true));
-        } else {
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::int())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::int())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float3', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNaN', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatInf', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-            $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNegInf', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
-        }
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolTrue2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'boolFalse2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::bool())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::int())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'int2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::int())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float1', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float2', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'float3', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNaN', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatInf', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(ObjectWithBasicProperties::class, 'floatNegInf', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::float())->withDescription('')->withReadable(false)->withWritable(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1699,20 +1903,11 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['relatedDummies']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(false)->withWritable(true)->withReadableLink(false)->withWritableLink(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
 
@@ -1749,12 +1944,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(NonCloneableDummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(false)->withWritable(true));
-        } else {
-            $propertyMetadataFactoryProphecy->create(NonCloneableDummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
-        }
+        $propertyMetadataFactoryProphecy->create(NonCloneableDummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(false)->withWritable(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
@@ -1789,12 +1979,7 @@ class AbstractItemNormalizerTest extends TestCase
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $propertyMetadataFactoryProphecy->create(DtoWithNullValue::class, 'dummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, nullable: true)])->withDescription('')->withReadable(true)->withWritable(true));
-        } else {
-            $propertyMetadataFactoryProphecy->create(DtoWithNullValue::class, 'dummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::nullable(Type::object()))->withDescription('')->withReadable(true)->withWritable(true));
-        }
+        $propertyMetadataFactoryProphecy->create(DtoWithNullValue::class, 'dummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::nullable(Type::object()))->withDescription('')->withReadable(true)->withWritable(true));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
@@ -1830,26 +2015,14 @@ class AbstractItemNormalizerTest extends TestCase
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['name', 'alias', 'relatedDummy', 'relatedDummies']));
 
-        // BC layer for api-platform/metadata < 4.1
-        if (!method_exists(PropertyInfoExtractor::class, 'getType')) {
-            $relatedDummyType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, RelatedDummy::class);
-            $relatedDummiesType = new LegacyType(LegacyType::BUILTIN_TYPE_OBJECT, false, ArrayCollection::class, true, new LegacyType(LegacyType::BUILTIN_TYPE_INT), $relatedDummyType);
+        $relatedDummyType = Type::object(RelatedDummy::class);
+        $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
 
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([new LegacyType(LegacyType::BUILTIN_TYPE_STRING)])->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummyType])->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withBuiltinTypes([$relatedDummiesType])->withReadable(true)->withWritable(false)->withReadableLink(false));
-        } else {
-            $relatedDummyType = Type::object(RelatedDummy::class);
-            $relatedDummiesType = Type::collection(Type::object(ArrayCollection::class), $relatedDummyType, Type::int());
-
-            $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
-            $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(false));
-        }
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'name', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'alias', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withDescription('')->withReadable(true));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummy', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummyType)->withDescription('')->withReadable(true)->withWritable(false)->withReadableLink(false));
+        $propertyMetadataFactoryProphecy->create(Dummy::class, 'relatedDummies', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType($relatedDummiesType)->withReadable(true)->withWritable(false)->withReadableLink(false));
 
         $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
         $iriConverterProphecy->getIriFromResource($dummy, Argument::cetera())->willReturn('/dummies/1');
@@ -1936,6 +2109,71 @@ class AbstractItemNormalizerTest extends TestCase
         $this->assertFalse($normalizer->supportsNormalization($std, null, [
             'api_platform_output_class' => 'SomeOtherClass',
         ]));
+    }
+
+    public function testDenormalizeReportsAllMissingConstructorArguments(): void
+    {
+        $data = [];
+
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(DummyWithMultipleRequiredConstructorArgs::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['title', 'rating', 'comment']));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+
+        $propertyMetadataFactoryProphecy->create(DummyWithMultipleRequiredConstructorArgs::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withReadable(true)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(DummyWithMultipleRequiredConstructorArgs::class, 'rating', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::int())->withReadable(true)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(DummyWithMultipleRequiredConstructorArgs::class, 'comment', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withReadable(true)->withWritable(true));
+
+        $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
+        $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->getResourceClass(null, DummyWithMultipleRequiredConstructorArgs::class)->willReturn(DummyWithMultipleRequiredConstructorArgs::class);
+        $resourceClassResolverProphecy->isResourceClass(DummyWithMultipleRequiredConstructorArgs::class)->willReturn(true);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(NormalizerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        try {
+            $normalizer->denormalize($data, DummyWithMultipleRequiredConstructorArgs::class);
+            $this->fail('Expected MissingConstructorArgumentsException was not thrown');
+        } catch (MissingConstructorArgumentsException $e) {
+            $this->assertCount(3, $e->getMissingConstructorArguments(), 'All three missing constructor arguments (title, rating, comment) should be reported, not just the first one.');
+            $this->assertSame(['title', 'rating', 'comment'], $e->getMissingConstructorArguments());
+        }
+    }
+
+    public function testDenormalizeNullableConstructorArgWithoutDefault(): void
+    {
+        $data = ['title' => 'Hello'];
+
+        $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
+        $propertyNameCollectionFactoryProphecy->create(DummyWithNullableConstructorArg::class, Argument::type('array'))->willReturn(new PropertyNameCollection(['title', 'description']));
+
+        $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
+
+        $propertyMetadataFactoryProphecy->create(DummyWithNullableConstructorArg::class, 'title', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::string())->withReadable(true)->withWritable(true));
+        $propertyMetadataFactoryProphecy->create(DummyWithNullableConstructorArg::class, 'description', Argument::type('array'))->willReturn((new ApiProperty())->withNativeType(Type::nullable(Type::string()))->withReadable(true)->withWritable(true));
+
+        $iriConverterProphecy = $this->prophesize(IriConverterInterface::class);
+        $propertyAccessorProphecy = $this->prophesize(PropertyAccessorInterface::class);
+        $resourceClassResolverProphecy = $this->prophesize(ResourceClassResolverInterface::class);
+        $resourceClassResolverProphecy->getResourceClass(null, DummyWithNullableConstructorArg::class)->willReturn(DummyWithNullableConstructorArg::class);
+        $resourceClassResolverProphecy->isResourceClass(DummyWithNullableConstructorArg::class)->willReturn(true);
+
+        $serializerProphecy = $this->prophesize(SerializerInterface::class);
+        $serializerProphecy->willImplement(NormalizerInterface::class);
+
+        $normalizer = new class($propertyNameCollectionFactoryProphecy->reveal(), $propertyMetadataFactoryProphecy->reveal(), $iriConverterProphecy->reveal(), $resourceClassResolverProphecy->reveal(), $propertyAccessorProphecy->reveal(), null, null, [], null, null) extends AbstractItemNormalizer {};
+        $normalizer->setSerializer($serializerProphecy->reveal());
+
+        $result = $normalizer->denormalize($data, DummyWithNullableConstructorArg::class);
+
+        $this->assertInstanceOf(DummyWithNullableConstructorArg::class, $result);
+        $this->assertSame('Hello', $result->title);
+        $this->assertNull($result->description);
     }
 }
 

@@ -27,6 +27,7 @@ class McpTool extends HttpOperation
 {
     /**
      * @param string|null                                    $name              The name of the tool (defaults to the method name)
+     * @param string|null                                    $title             Optional human-readable title for display in UI
      * @param string|null                                    $description       The description of the tool (defaults to the DocBlock/inferred)
      * @param bool|null                                      $structuredContent Whether to include structured content in the response (defaults to true)
      * @param mixed|null                                     $annotations       Optional annotations describing tool behavior
@@ -90,6 +91,7 @@ class McpTool extends HttpOperation
      */
     public function __construct(
         ?string $name = null,
+        protected ?string $title = null,
         ?string $description = null,
         protected ?bool $structuredContent = null,
         protected mixed $annotations = null,
@@ -120,6 +122,7 @@ class McpTool extends HttpOperation
         ?array $cacheHeaders = null,
         ?array $paginationViaCursor = null,
         ?array $hydraContext = null,
+        ?array $jsonldContext = null,
         bool|OpenApiOperation|Webhook|null $openapi = null,
         ?array $exceptionToStatus = null,
         ?array $links = null,
@@ -162,6 +165,7 @@ class McpTool extends HttpOperation
         ?bool $validate = null,
         ?bool $write = null,
         ?bool $serialize = null,
+        ?bool $contentNegotiation = null,
         ?bool $fetchPartial = null,
         ?bool $forceEager = null,
         ?int $priority = null,
@@ -202,6 +206,7 @@ class McpTool extends HttpOperation
             cacheHeaders: $cacheHeaders,
             paginationViaCursor: $paginationViaCursor,
             hydraContext: $hydraContext,
+            jsonldContext: $jsonldContext,
             openapi: $openapi,
             exceptionToStatus: $exceptionToStatus,
             links: $links,
@@ -244,6 +249,7 @@ class McpTool extends HttpOperation
             validate: $validate,
             write: $write,
             serialize: $serialize,
+            contentNegotiation: $contentNegotiation,
             fetchPartial: $fetchPartial,
             forceEager: $forceEager,
             priority: $priority,
@@ -316,6 +322,19 @@ class McpTool extends HttpOperation
     {
         $self = clone $this;
         $self->structuredContent = $structuredContent;
+
+        return $self;
+    }
+
+    public function getTitle(): ?string
+    {
+        return $this->title;
+    }
+
+    public function withTitle(?string $title): static
+    {
+        $self = clone $this;
+        $self->title = $title;
 
         return $self;
     }

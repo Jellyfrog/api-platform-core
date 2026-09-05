@@ -22,6 +22,7 @@ use ApiPlatform\Metadata\JsonSchemaFilterInterface;
 use ApiPlatform\Metadata\OpenApiParameterFilterInterface;
 use ApiPlatform\Metadata\Operation;
 use ApiPlatform\Metadata\Parameter;
+use ApiPlatform\Metadata\SortFilterInterface;
 use Doctrine\ORM\Query\Expr\Join;
 use Doctrine\ORM\QueryBuilder;
 
@@ -35,7 +36,7 @@ use Doctrine\ORM\QueryBuilder;
  *
  * @author Antoine Bluchet <soyuka@gmail.com>
  */
-final class SortFilter implements FilterInterface, JsonSchemaFilterInterface, OpenApiParameterFilterInterface
+final class SortFilter implements FilterInterface, JsonSchemaFilterInterface, OpenApiParameterFilterInterface, SortFilterInterface
 {
     use BackwardCompatibleFilterDescriptionTrait;
     use NestedPropertyHelperTrait;
@@ -53,8 +54,8 @@ final class SortFilter implements FilterInterface, JsonSchemaFilterInterface, Op
             return;
         }
 
-        $value = $context['filters'][$parameter->getProperty() ?? ''] ?? null;
-        if (null === $value) {
+        $value = $parameter->getValue(null);
+        if (!\is_string($value)) {
             return;
         }
 
@@ -69,10 +70,12 @@ final class SortFilter implements FilterInterface, JsonSchemaFilterInterface, Op
         [$alias, $field] = $this->addNestedParameterJoins($property, $alias, $queryBuilder, $queryNameGenerator, $parameter, Join::LEFT_JOIN);
 
         if (null !== $nullsComparison = $this->nullsComparison) {
-            $nullsDirection = OrderFilterInterface::NULLS_DIRECTION_MAP[$nullsComparison][$direction];
-            $nullRankHiddenField = \sprintf('_%s_%s_null_rank', $alias, str_replace('.', '_', $field));
-            $queryBuilder->addSelect(\sprintf('CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END AS HIDDEN %s', $alias, $field, $nullRankHiddenField));
-            $queryBuilder->addOrderBy($nullRankHiddenField, $nullsDirection);
+            $nullsDirection = OrderFilterInterface::NULLS_DIRECTION_MAP[$nullsComparison][$direction] ?? null;
+            if (null !== $nullsDirection) {
+                $nullRankHiddenField = \sprintf('_%s_%s_null_rank', $alias, str_replace('.', '_', $field));
+                $queryBuilder->addSelect(\sprintf('CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END AS HIDDEN %s', $alias, $field, $nullRankHiddenField));
+                $queryBuilder->addOrderBy($nullRankHiddenField, $nullsDirection);
+            }
         }
 
         $queryBuilder->addOrderBy(\sprintf('%s.%s', $alias, $field), $direction);

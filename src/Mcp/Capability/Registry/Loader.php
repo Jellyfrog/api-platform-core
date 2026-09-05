@@ -23,7 +23,7 @@ use ApiPlatform\Metadata\Resource\Factory\ResourceNameCollectionFactoryInterface
 use Mcp\Capability\Registry\Loader\LoaderInterface;
 use Mcp\Capability\RegistryInterface;
 use Mcp\Schema\Annotations;
-use Mcp\Schema\Resource;
+use Mcp\Schema\ResourceDefinition;
 use Mcp\Schema\Tool;
 use Mcp\Schema\ToolAnnotations;
 
@@ -50,31 +50,34 @@ final class Loader implements LoaderInterface
                 foreach ($resource->getMcp() ?? [] as $mcp) {
                     if ($mcp instanceof McpTool) {
                         $inputClass = $mcp->getInput()['class'] ?? $mcp->getClass();
-                        $inputFormat = array_first($mcp->getInputFormats() ?? ['json']);
+                        $inputFormat = array_key_first($mcp->getInputFormats() ?? ['json' => ['application/json']]);
                         $inputSchema = $this->schemaFactory->buildSchema($inputClass, $inputFormat, Schema::TYPE_INPUT, $mcp, null, [SchemaFactory::FORCE_SUBSCHEMA => true]);
 
-                        $outputClass = $mcp->getOutput()['class'] ?? $mcp->getClass();
-                        $outputFormat = array_first($mcp->getOutputFormats() ?? ['jsonld']);
-                        $outputSchema = $this->schemaFactory->buildSchema($outputClass, $outputFormat, Schema::TYPE_OUTPUT, $mcp, null, [SchemaFactory::FORCE_SUBSCHEMA => true]);
+                        $outputSchema = null;
+                        if (false !== $mcp->getStructuredContent()) {
+                            $outputClass = $mcp->getOutput()['class'] ?? $mcp->getClass();
+                            $outputFormat = array_key_first($mcp->getOutputFormats() ?? ['json' => ['application/json']]);
+                            $outputSchema = $this->schemaFactory->buildSchema($outputClass, $outputFormat, Schema::TYPE_OUTPUT, $mcp, null, [SchemaFactory::FORCE_SUBSCHEMA => true])->getArrayCopy();
+                        }
 
                         $registry->registerTool(
                             new Tool(
                                 name: $mcp->getName(),
-                                inputSchema: $inputSchema->getDefinitions()[$inputSchema->getRootDefinitionKey()]->getArrayCopy(),
+                                title: $mcp->getTitle(),
+                                inputSchema: $inputSchema->getArrayCopy(),
                                 description: $mcp->getDescription(),
                                 annotations: $mcp->getAnnotations() ? ToolAnnotations::fromArray($mcp->getAnnotations()) : null,
                                 icons: $mcp->getIcons(),
                                 meta: $mcp->getMeta(),
-                                outputSchema: $outputSchema->getArrayCopy(),
+                                outputSchema: $outputSchema,
                             ),
                             self::HANDLER,
-                            true,
                         );
                     }
 
                     if ($mcp instanceof McpResource) {
                         $registry->registerResource(
-                            new Resource(
+                            new ResourceDefinition(
                                 uri: $mcp->getUri(),
                                 name: $mcp->getName(),
                                 description: $mcp->getDescription(),
@@ -85,7 +88,6 @@ final class Loader implements LoaderInterface
                                 meta: $mcp->getMeta()
                             ),
                             self::HANDLER,
-                            true,
                         );
                     }
                 }

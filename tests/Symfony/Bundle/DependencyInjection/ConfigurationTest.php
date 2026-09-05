@@ -15,6 +15,7 @@ namespace ApiPlatform\Tests\Symfony\Bundle\DependencyInjection;
 
 use ApiPlatform\Metadata\Exception\InvalidArgumentException;
 use ApiPlatform\Symfony\Bundle\DependencyInjection\Configuration;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\OptimisticLockException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -101,12 +102,12 @@ class ConfigurationTest extends TestCase
                 ExceptionInterface::class => Response::HTTP_BAD_REQUEST,
                 InvalidArgumentException::class => Response::HTTP_BAD_REQUEST,
                 OptimisticLockException::class => Response::HTTP_CONFLICT,
+                UniqueConstraintViolationException::class => Response::HTTP_UNPROCESSABLE_ENTITY,
             ],
             'path_segment_name_generator' => 'api_platform.metadata.path_segment_name_generator.underscore',
             'inflector' => 'api_platform.metadata.inflector',
             'validator' => [
                 'serialize_payload_fields' => [],
-                'query_parameter_validation' => true,
             ],
             'name_converter' => null,
             'enable_swagger' => true,
@@ -132,15 +133,13 @@ class ConfigurationTest extends TestCase
                         'enabled' => true,
                     ],
                 ],
-                'graphql_playground' => [
-                    'enabled' => false,
-                ],
             ],
             'elasticsearch' => [
                 'enabled' => false,
                 'hosts' => [],
                 'ssl_ca_bundle' => null,
                 'ssl_verification' => true,
+                'client' => 'elasticsearch',
             ],
             'oauth' => [
                 'enabled' => false,
@@ -160,6 +159,7 @@ class ConfigurationTest extends TestCase
                 'http_auth' => [],
                 'swagger_ui_extra_configuration' => [],
                 'persist_authorization' => false,
+                'with_credentials' => false,
             ],
             'eager_loading' => [
                 'enabled' => true,
@@ -187,11 +187,9 @@ class ConfigurationTest extends TestCase
             'http_cache' => [
                 'invalidation' => [
                     'enabled' => false,
-                    'varnish_urls' => [],
                     'request_options' => [],
                     'max_header_length' => 7500,
                     'purger' => 'api_platform.http_cache.purger.varnish',
-                    'xkey' => ['glue' => ' '],
                     'urls' => [],
                     'scoped_clients' => [],
                 ],
@@ -211,7 +209,6 @@ class ConfigurationTest extends TestCase
                 'hub_url' => null,
                 'include_type' => false,
             ],
-            'resource_class_directories' => [],
             'asset_package' => null,
             'openapi' => [
                 'contact' => [
@@ -230,6 +227,7 @@ class ConfigurationTest extends TestCase
                 'tags' => [],
                 'error_resource_class' => null,
                 'validation_error_resource_class' => null,
+                'scalar_extra_configuration' => [],
             ],
             'maker' => [
                 'enabled' => true,
@@ -237,18 +235,20 @@ class ConfigurationTest extends TestCase
             ],
             'use_symfony_listeners' => false,
             'handle_symfony_errors' => false,
-            // TODO: remove in 5.0
-            'enable_link_security' => true,
             'serializer' => [
                 'hydra_prefix' => null,
             ],
             'enable_phpdoc_parser' => true,
             'mcp' => [
                 'enabled' => true,
+                'format' => 'jsonld',
             ],
             'jsonapi' => [
-                'use_iri_as_id' => true,
+                'use_iri_as_id' => null,
+                'allow_client_generated_id' => false,
             ],
+            'enable_scalar' => true,
+            'enable_head_request_optimization' => true,
         ], $config);
     }
 
@@ -489,6 +489,25 @@ class ConfigurationTest extends TestCase
         $this->assertNull($config['elasticsearch']['ssl_ca_bundle']);
     }
 
+    public function testElasticsearchOpenSearchClientRequiresPackage(): void
+    {
+        if (class_exists(\OpenSearch\Client::class)) {
+            self::markTestSkipped('opensearch-project/opensearch-php is installed.');
+        }
+
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('Setting api_platform.elasticsearch.client to "opensearch" requires the opensearch-project/opensearch-php package.');
+
+        $this->processor->processConfiguration($this->configuration, [
+            'api_platform' => [
+                'elasticsearch' => [
+                    'enabled' => true,
+                    'client' => 'opensearch',
+                ],
+            ],
+        ]);
+    }
+
     public function testElasticsearchSslCaBundleAndVerificationDisabledMutuallyExclusive(): void
     {
         $this->expectException(InvalidConfigurationException::class);
@@ -504,5 +523,21 @@ class ConfigurationTest extends TestCase
                 ],
             ],
         ]);
+    }
+
+    public function testOauthScopeNaming(): void
+    {
+        $config = $this->processor->processConfiguration($this->configuration, [
+            'api_platform' => [
+                'oauth' => [
+                    'enabled' => true,
+                    'scopes' => [
+                        'resource:read-write' => 'Read and write resource data',
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertEquals(['resource:read-write' => 'Read and write resource data'], $config['oauth']['scopes']);
     }
 }

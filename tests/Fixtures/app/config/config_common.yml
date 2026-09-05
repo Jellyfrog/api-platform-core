@@ -1,8 +1,10 @@
 parameters:
     container.autowiring.strict_mode: true
     .container.dumper.inline_class_loader: true
-    env(MERCURE_URL): https://demo.mercure.rocks
+    env(MERCURE_URL): http://localhost:1337/.well-known/mercure
     env(MERCURE_JWT_SECRET): eyJhbGciOiJIUzI1NiJ9.eyJtZXJjdXJlIjp7InB1Ymxpc2giOlsiKiJdLCJzdWJzY3JpYmUiOlsiaHR0cHM6Ly9leGFtcGxlLmNvbS9teS1wcml2YXRlLXRvcGljIiwie3NjaGVtZX06Ly97K2hvc3R9L2RlbW8vYm9va3Mve2lkfS5qc29ubGQiLCIvLndlbGwta25vd24vbWVyY3VyZS9zdWJzY3JpcHRpb25zey90b3BpY317L3N1YnNjcmliZXJ9Il0sInBheWxvYWQiOnsidXNlciI6Imh0dHBzOi8vZXhhbXBsZS5jb20vdXNlcnMvZHVuZ2xhcyIsInJlbW90ZUFkZHIiOiIxMjcuMC4wLjEifX19.KKPIikwUzRuB3DTpVw6ajzwSChwFw5omBMmMcWKiDcM
+    # Only config_mercure.yml (APP_ENV=mercure) runs a hub and flips this on.
+    app.mercure.publish_to_hub: false
 
 doctrine:
     dbal:
@@ -25,9 +27,6 @@ web_profiler:
 mercure:
     hubs:
         default:
-            url: '%env(MERCURE_URL)%'
-            jwt: '%env(MERCURE_JWT_SECRET)%'
-        debug:
             url: '%env(MERCURE_URL)%'
             jwt: '%env(MERCURE_JWT_SECRET)%'
 
@@ -61,6 +60,8 @@ api_platform:
         jsonapi:                       ['application/vnd.api+json']
         html:                          ['text/html']
         xml:                           ['application/xml', 'text/xml']
+    jsonapi:
+        use_iri_as_id: true
     graphql:
         enabled: true
         nesting_separator: __
@@ -83,8 +84,6 @@ api_platform:
     http_cache:
         invalidation:
             enabled: true
-    # TODO: remove in 5.0
-    enable_link_security: true
     # see also defaults in AppKernel
     doctrine_mongodb_odm: false
     mapping:
@@ -95,15 +94,15 @@ api_platform:
         include_type: true
 
 mcp:
-    client_transports:
-        http: true
-        stdio: false
-    http:
-        path: '/mcp'
-        session:
-            store: 'file'
-            directory: '%kernel.cache_dir%/mcp'
-            ttl: 3600
+    servers:
+        default:
+            http:
+                path: '/mcp'
+            session:
+                store: 'file'
+                directory: '%kernel.cache_dir%/mcp'
+                ttl: 3600
+            registry: '*'
 
 services:
     test.client:
@@ -130,6 +129,10 @@ services:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\AttributeResourceProvider'
         tags:
             - name: 'api_platform.state_provider'
+
+    ApiPlatform\Tests\Fixtures\TestBundle\Doctrine\Orm\FetchDataFalseStateOptionsItemExtension:
+        tags:
+            - name: 'api_platform.doctrine.orm.query_extension.item'
 
     ApiPlatform\Tests\Fixtures\TestBundle\State\DummyCollectionDtoProvider:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\DummyCollectionDtoProvider'
@@ -159,11 +162,6 @@ services:
         tags:
             - name: 'api_platform.state_provider'
 
-    ApiPlatform\Tests\Fixtures\TestBundle\State\SerializableProvider:
-        class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\SerializableProvider'
-        tags:
-            - name: 'api_platform.state_provider'
-
     ApiPlatform\Tests\Fixtures\TestBundle\State\FakeProvider:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\FakeProvider'
         tags:
@@ -176,6 +174,12 @@ services:
 
     ApiPlatform\Tests\Fixtures\TestBundle\State\RelationMultipleProvider:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\RelationMultipleProvider'
+        tags:
+            - name: 'api_platform.state_provider'
+
+    ApiPlatform\Tests\Fixtures\TestBundle\State\JsonLdPaginationCappedProvider:
+        class: 'ApiPlatform\Tests\Fixtures\TestBundle\State\JsonLdPaginationCappedProvider'
+        arguments: ['@api_platform.pagination']
         tags:
             - name: 'api_platform.state_provider'
 
@@ -205,6 +209,11 @@ services:
         arguments: ['@api_platform.iri_converter']
         tags:
             - name: 'serializer.normalizer'
+
+    app.serializer.denormalizer.input_dto:
+      class: 'ApiPlatform\Tests\Fixtures\TestBundle\Serializer\Denormalizer\InputDtoDenormalizer'
+      tags:
+          -   name: 'serializer.normalizer'
 
     app.name_converter:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\Serializer\NameConverter\CustomConverter'
@@ -280,10 +289,19 @@ services:
         tags:
             - name: 'api_platform.validation_groups_generator'
 
+    # Plain service, not a second `mercure.hubs` entry: the bundle registers one messenger
+    # handler per hub, so a second hub published every async update a second time, unguarded.
+    app.mercure.inner_hub:
+        class: Symfony\Component\Mercure\Hub
+        arguments:
+            $url: '%env(MERCURE_URL)%'
+            $jwtProvider: '@mercure.hub.default.jwt.provider'
+
     mercure.hub.default.test_hub:
         class: ApiPlatform\Tests\Fixtures\TestBundle\Mercure\TestHub
         arguments:
-           $hub: '@mercure.hub.debug'
+           $hub: '@app.mercure.inner_hub'
+           $publishToHub: '%app.mercure.publish_to_hub%'
         public: true
     mercure.hub.default: '@mercure.hub.default.test_hub'
 
@@ -303,6 +321,10 @@ services:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\MessengerHandler\MessengerWithResponseHandler'
         tags:
             - name: 'messenger.message_handler'
+
+    ApiPlatform\Tests\Fixtures\TestBundle\ApiResource\Issue3975\ActionSimulationResolver:
+        tags:
+            - name: 'api_platform.graphql.resolver'
 
     app.graphql.query_resolver.dummy_custom_item:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\GraphQl\Resolver\DummyCustomQueryItemResolver'
@@ -405,6 +427,10 @@ services:
         decorates: api_platform.metadata.resource.metadata_collection_factory
         arguments: ['@ApiPlatform\Tests\Fixtures\TestBundle\Metadata\ProviderResourceMetadatatCollectionFactory.inner']
 
+    ApiPlatform\Tests\Fixtures\TestBundle\OpenApi\Issue8143ResponseComponentFactory:
+        decorates: api_platform.openapi.factory
+        arguments: ['@ApiPlatform\Tests\Fixtures\TestBundle\OpenApi\Issue8143ResponseComponentFactory.inner']
+
     app.related_dummy_resource.complex_sub_query_filter:
         class: ApiPlatform\Tests\Fixtures\TestBundle\Filter\ComplexSubQueryFilter
         arguments: ['@doctrine']
@@ -488,6 +514,11 @@ services:
 
     app.graphql.mutation_resolver.activity_log:
         class: 'ApiPlatform\Tests\Fixtures\TestBundle\ApiResource\Issue6354\CreateActivityLogResolver'
+        tags:
+            - name: 'api_platform.graphql.resolver'
+
+    app.graphql.mutation_resolver.issue2754_sum:
+        class: 'ApiPlatform\Tests\Fixtures\TestBundle\ApiResource\Issue2754\SumResolver'
         tags:
             - name: 'api_platform.graphql.resolver'
 

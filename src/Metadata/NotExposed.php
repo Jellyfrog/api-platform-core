@@ -56,6 +56,7 @@ final class NotExposed extends HttpOperation
         ?array $paginationViaCursor = null,
 
         ?array $hydraContext = null,
+        ?array $jsonldContext = null,
         bool|OpenApiOperation|Webhook|null $openapi = false,
         ?array $exceptionToStatus = null,
 
@@ -99,6 +100,7 @@ final class NotExposed extends HttpOperation
         ?bool $validate = null,
         ?bool $write = null,
         ?bool $serialize = null,
+        ?bool $contentNegotiation = null,
         ?bool $fetchPartial = null,
         ?bool $forceEager = null,
         ?int $priority = null,
@@ -134,6 +136,7 @@ final class NotExposed extends HttpOperation
             cacheHeaders: $cacheHeaders,
             paginationViaCursor: $paginationViaCursor,
             hydraContext: $hydraContext,
+            jsonldContext: $jsonldContext,
             openapi: $openapi,
             exceptionToStatus: $exceptionToStatus,
             queryParameterValidationEnabled: $queryParameterValidationEnabled,
@@ -175,6 +178,7 @@ final class NotExposed extends HttpOperation
             validate: $validate,
             write: $write,
             serialize: $serialize,
+            contentNegotiation: $contentNegotiation,
             fetchPartial: $fetchPartial,
             forceEager: $forceEager,
             priority: $priority,

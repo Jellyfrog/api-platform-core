@@ -30,7 +30,7 @@ use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
  *
  * @author Kévin Dunglas <dunglas@gmail.com>
  */
-final class ContextBuilder implements AnonymousContextBuilderInterface
+final class ContextBuilder implements AnonymousContextBuilderInterface, OperationContextBuilderInterface
 {
     use ClassInfoTrait;
     use HydraPrefixTrait;
@@ -82,19 +82,8 @@ final class ContextBuilder implements AnonymousContextBuilderInterface
     {
         /** @var HttpOperation $operation */
         $operation = $this->resourceMetadataFactory->create($resourceClass)->getOperation(null, false, true);
-        if (null === $shortName = $operation->getShortName()) {
-            return [];
-        }
 
-        $context = $operation->getNormalizationContext();
-        if ($context['iri_only'] ?? false) {
-            $context = $this->getBaseContext($referenceType);
-            $context[$this->getHydraPrefix($context).'member']['@type'] = '@id';
-
-            return $context;
-        }
-
-        return $this->getResourceContextWithShortname($resourceClass, $referenceType, $shortName, $operation);
+        return $this->getResourceContextFromOperation($operation, $resourceClass, $referenceType);
     }
 
     /**
@@ -103,11 +92,8 @@ final class ContextBuilder implements AnonymousContextBuilderInterface
     public function getResourceContextUri(string $resourceClass, ?int $referenceType = null): string
     {
         $resourceMetadata = $this->resourceMetadataFactory->create($resourceClass)[0];
-        if (null === $referenceType) {
-            $referenceType = $resourceMetadata->getUrlGenerationStrategy();
-        }
 
-        return $this->urlGenerator->generate('api_jsonld_context', ['shortName' => $resourceMetadata->getShortName()], $referenceType ?? UrlGeneratorInterface::ABS_PATH);
+        return $this->generateContextUri($resourceMetadata->getShortName(), $referenceType ?? $resourceMetadata->getUrlGenerationStrategy());
     }
 
     /**
@@ -155,18 +141,50 @@ final class ContextBuilder implements AnonymousContextBuilderInterface
             unset($jsonLdContext['@context']);
         }
 
-        // here the object can be different from the resource given by the $context['api_resource'] value
-        // TODO: this is probably not used anymore and is slow we get that @type way earlier, remove this
-        if (isset($context['api_resource'])) {
-            $jsonLdContext['@type'] = $this->resourceMetadataFactory->create($this->getObjectClass($context['api_resource']))[0]->getShortName();
+        return $jsonLdContext;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getResourceContextUriFromOperation(HttpOperation $operation, ?int $referenceType = null): string
+    {
+        return $this->generateContextUri($operation->getShortName(), $referenceType ?? $operation->getUrlGenerationStrategy());
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getResourceContextFromOperation(HttpOperation $operation, string $resourceClass, int $referenceType = UrlGeneratorInterface::ABS_PATH): array
+    {
+        if (null === $shortName = $operation->getShortName()) {
+            return [];
         }
 
-        return $jsonLdContext;
+        $context = $operation->getNormalizationContext();
+        if ($context['iri_only'] ?? false) {
+            $context = $this->getBaseContext($referenceType);
+            $context[$this->getHydraPrefix($context).'member']['@type'] = '@id';
+
+            return $context;
+        }
+
+        return $this->getResourceContextWithShortname($resourceClass, $referenceType, $shortName, $operation);
+    }
+
+    private function generateContextUri(?string $shortName, ?int $referenceType): string
+    {
+        return $this->urlGenerator->generate('api_jsonld_context', ['shortName' => $shortName], $referenceType ?? UrlGeneratorInterface::ABS_PATH);
     }
 
     private function getResourceContextWithShortname(string $resourceClass, int $referenceType, string $shortName, ?HttpOperation $operation = null): array
     {
         $context = $this->getBaseContext($referenceType);
+
+        if ($operation && $jsonldContext = $operation->getJsonldContext()) {
+            $context = array_merge($context, $jsonldContext);
+        }
+
         $propertyContext = $operation ? ['normalization_groups' => $operation->getNormalizationContext()['groups'] ?? null, 'denormalization_groups' => $operation->getDenormalizationContext()['groups'] ?? null] : ['normalization_groups' => [], 'denormalization_groups' => []];
 
         foreach ($this->propertyNameCollectionFactory->create($resourceClass) as $propertyName) {

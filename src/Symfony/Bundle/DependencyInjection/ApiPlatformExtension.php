@@ -30,6 +30,8 @@ use ApiPlatform\GraphQl\Resolver\MutationResolverInterface;
 use ApiPlatform\GraphQl\Resolver\QueryCollectionResolverInterface;
 use ApiPlatform\GraphQl\Resolver\QueryItemResolverInterface;
 use ApiPlatform\GraphQl\Type\Definition\TypeInterface as GraphQlTypeInterface;
+use ApiPlatform\HttpCache\PurgerInterface;
+use ApiPlatform\JsonApi\Serializer\ItemNormalizer as JsonApiItemNormalizer;
 use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\Metadata\AsOperationMutator;
 use ApiPlatform\Metadata\AsResourceMutator;
@@ -84,6 +86,7 @@ use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpClient\ScopingHttpClient;
 use Symfony\Component\JsonStreamer\JsonStreamWriter;
 use Symfony\Component\ObjectMapper\ObjectMapper;
+use Symfony\Component\ObjectMapper\ObjectMapperInterface;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\Serializer\Normalizer\NumberNormalizer;
 use Symfony\Component\Uid\AbstractUid;
@@ -147,6 +150,11 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             if (!isset($config['defaults']['hideHydraOperation']) && !isset($config['defaults']['hide_hydra_operation'])) {
                 $config['defaults']['hideHydraOperation'] = true;
             }
+            // Disabling docs is a master switch: also disable Swagger UI and ReDoc
+            // to prevent HTML documentation from being served on resource endpoints.
+            $config['enable_swagger_ui'] = false;
+            $config['enable_re_doc'] = false;
+            $config['enable_scalar'] = false;
         }
         $jsonSchemaFormats = $config['jsonschema_formats'];
 
@@ -171,6 +179,11 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             $patchFormats['jsonapi'] = ['application/vnd.api+json'];
         }
 
+        // McpToolProvider requires Symfony's object_mapper service; mirror FrameworkBundle's gate so we don't try to wire it when object-mapper is dev-only.
+        $mcpEnabled = ($config['mcp']['enabled'] ?? false) && class_exists(McpBundle::class) && ContainerBuilder::willBeAvailable('symfony/object-mapper', ObjectMapperInterface::class, ['symfony/framework-bundle']);
+        // kernel listeners never run for a JSON-RPC tool call, so MCP needs its own provider chain
+        $mcpProviderChain = $mcpEnabled && $config['use_symfony_listeners'];
+
         $this->registerCommonConfiguration($container, $config, $loader, $formats, $patchFormats, $errorFormats, $docsFormats);
         $this->registerMetadataConfiguration($container, $config, $loader);
         $this->registerOAuthConfiguration($container, $config);
@@ -185,26 +198,30 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         $this->registerDoctrineOrmConfiguration($container, $config, $loader);
         $this->registerDoctrineMongoDbOdmConfiguration($container, $config, $loader);
         $this->registerHttpCacheConfiguration($container, $config, $loader);
-        $this->registerValidatorConfiguration($container, $config, $loader);
+        $this->registerValidatorConfiguration($container, $config, $loader, $mcpProviderChain);
         $this->registerDataCollectorConfiguration($container, $config, $loader);
         $this->registerMercureConfiguration($container, $config, $loader);
         $this->registerMessengerConfiguration($container, $config, $loader);
         $this->registerElasticsearchConfiguration($container, $config, $loader);
-        $this->registerSecurityConfiguration($container, $config, $loader);
+        $this->registerSecurityConfiguration($container, $config, $loader, $mcpProviderChain);
         $this->registerMakerConfiguration($container, $config, $loader);
         $this->registerArgumentResolverConfiguration($loader);
         $this->registerLinkSecurityConfiguration($loader, $config);
         $this->registerJsonStreamerConfiguration($container, $loader, $formats, $config);
 
-        // TranslationExtractCommand was introduced in framework-bundle/7.3 with the object mapper service
-        if (class_exists(ObjectMapper::class) && class_exists(TranslationExtractCommand::class)) {
+        // TranslationExtractCommand was introduced in framework-bundle/7.3 with the object mapper service.
+        // willBeAvailable mirrors FrameworkBundle's own gate: when symfony/object-mapper is in dev-only,
+        // FrameworkBundle skips object_mapper.php and the "object_mapper" service we alias to does not exist.
+        if (class_exists(ObjectMapper::class) && class_exists(TranslationExtractCommand::class) && ContainerBuilder::willBeAvailable('symfony/object-mapper', ObjectMapperInterface::class, ['symfony/framework-bundle'])) {
             $loader->load('state/object_mapper.php');
             $loader->load($config['use_symfony_listeners'] ? 'symfony/object_mapper.php' : 'state/object_mapper_processor.php');
         }
 
-        if (($config['mcp']['enabled'] ?? false) && class_exists(McpBundle::class)) {
+        $container->setParameter('api_platform.mcp.format', $config['mcp']['format'] ?? null);
+
+        if ($mcpEnabled) {
             $loader->load('mcp/mcp.php');
-            $loader->load($config['use_symfony_listeners'] ? 'mcp/events.php' : 'mcp/state.php');
+            $loader->load($mcpProviderChain ? 'mcp/events.php' : 'mcp/state.php');
         }
 
         $container->registerForAutoconfiguration(FilterInterface::class)
@@ -263,10 +280,9 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             Put::class,
             ApiResource::class,
         ] as $class) {
-            $container->registerAttributeForAutoconfiguration($class, static function (ChildDefinition $definition) use ($class): void {
+            $container->registerAttributeForAutoconfiguration($class, static function (ChildDefinition $definition): void {
                 $definition->setAbstract(true)
-                    ->addTag('api_platform.resource')
-                    ->addTag('container.excluded', ['source' => 'by #['.(new \ReflectionClass($class))->getShortName().'] attribute']);
+                    ->addTag('api_platform.resource');
             });
         }
 
@@ -309,6 +325,10 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         $loader->load('api.php');
         $loader->load('filter.php');
 
+        if (class_exists(\PhpParser\ParserFactory::class)) {
+            $loader->load('upgrade.php');
+        }
+
         if (class_exists(UuidDenormalizer::class) && class_exists(Uuid::class)) {
             $loader->load('ramsey_uuid.php');
         }
@@ -343,6 +363,7 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
 
         $container->setParameter('api_platform.enable_entrypoint', $config['enable_entrypoint']);
         $container->setParameter('api_platform.enable_docs', $config['enable_docs']);
+        $container->setParameter('api_platform.enable_head_request_optimization', $config['enable_head_request_optimization']);
         $container->setParameter('api_platform.title', $config['title']);
         $container->setParameter('api_platform.description', $config['description']);
         $container->setParameter('api_platform.version', $config['version']);
@@ -353,6 +374,11 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         $container->setParameter('api_platform.patch_formats', $patchFormats);
         $container->setParameter('api_platform.error_formats', $errorFormats);
         $container->setParameter('api_platform.docs_formats', $docsFormats);
+        // The entrypoint only has normalizers for hypermedia formats (jsonld, jsonhal, jsonapi) and a
+        // dedicated Swagger UI code path for html. Other documentation formats (e.g. openapi, yamlopenapi)
+        // have no Entrypoint normalizer and must not be advertised, otherwise content negotiation lets them
+        // through and the Symfony ObjectNormalizer fallback leaks the internal ResourceNameCollection FQCNs.
+        $container->setParameter('api_platform.entrypoint_formats', array_intersect_key($docsFormats, array_flip(['jsonld', 'jsonhal', 'jsonapi', 'html'])));
         $container->setParameter('api_platform.jsonschema_formats', []);
         $container->setParameter('api_platform.eager_loading.enabled', $this->isConfigEnabled($container, $config['eager_loading']));
         $container->setParameter('api_platform.eager_loading.max_joins', $config['eager_loading']['max_joins']);
@@ -383,7 +409,7 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         $container->setParameter('api_platform.http_cache.stale_while_revalidate', $config['defaults']['cache_headers']['stale_while_revalidate'] ?? null);
         $container->setParameter('api_platform.http_cache.stale_if_error', $config['defaults']['cache_headers']['stale_if_error'] ?? null);
         $container->setParameter('api_platform.http_cache.invalidation.max_header_length', $config['defaults']['cache_headers']['invalidation']['max_header_length'] ?? $config['http_cache']['invalidation']['max_header_length']);
-        $container->setParameter('api_platform.http_cache.invalidation.xkey.glue', $config['defaults']['cache_headers']['invalidation']['xkey']['glue'] ?? $config['http_cache']['invalidation']['xkey']['glue']);
+        $container->setParameter('api_platform.http_cache.invalidation.xkey.glue', $config['defaults']['cache_headers']['invalidation']['xkey']['glue'] ?? ' ');
 
         $container->setAlias('api_platform.path_segment_name_generator', $config['path_segment_name_generator']);
         $container->setAlias('api_platform.inflector', $config['inflector']);
@@ -392,7 +418,9 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             $container->setAlias('api_platform.name_converter', $config['name_converter']);
         }
         $container->setParameter('api_platform.asset_package', $config['asset_package']);
-        $container->setParameter('api_platform.defaults', $this->normalizeDefaults($config['defaults'] ?? []));
+        $normalizedDefaults = $this->normalizeDefaults($config['defaults'] ?? []);
+        $container->setParameter('api_platform.defaults', $normalizedDefaults);
+        $container->setParameter('api_platform.defaults.parameters', $config['defaults']['parameters'] ?? []);
 
         if ($container->getParameter('kernel.debug')) {
             $container->removeDefinition('api_platform.serializer.mapping.cache_class_metadata_factory');
@@ -421,6 +449,7 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
     {
         $normalizedDefaults = ['extra_properties' => $defaults['extra_properties'] ?? []];
         unset($defaults['extra_properties']);
+        unset($defaults['parameters']);
 
         $rc = new \ReflectionClass(ApiResource::class);
         $publicProperties = [];
@@ -450,13 +479,6 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
 
         $loader->load('metadata/resource_name.php');
         $loader->load('metadata/property_name.php');
-
-        if (!empty($config['resource_class_directories'])) {
-            $container->setParameter('api_platform.resource_class_directories', array_merge(
-                $config['resource_class_directories'],
-                $container->getParameter('api_platform.resource_class_directories')
-            ));
-        }
 
         // V3 metadata
         $loader->load('metadata/php.php');
@@ -640,6 +662,7 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         if (!$config['enable_swagger']) {
             $container->setParameter('api_platform.enable_swagger_ui', false);
             $container->setParameter('api_platform.enable_re_doc', false);
+            $container->setParameter('api_platform.enable_scalar', false);
 
             return;
         }
@@ -650,7 +673,7 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             $loader->load('openapi/yaml.php');
         }
 
-        if ($config['enable_swagger_ui'] || $config['enable_re_doc']) {
+        if ($config['enable_swagger_ui'] || $config['enable_re_doc'] || $config['enable_scalar']) {
             $loader->load('swagger_ui.php');
 
             if ($config['use_symfony_listeners']) {
@@ -660,20 +683,23 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             $loader->load('state/swagger_ui.php');
         }
 
-        if (!$config['enable_swagger_ui'] && !$config['enable_re_doc']) {
+        if (!$config['enable_swagger_ui'] && !$config['enable_re_doc'] && !$config['enable_scalar']) {
             // Remove the listener but keep the controller to allow customizing the path of the UI
             $container->removeDefinition('api_platform.swagger.listener.ui');
         }
 
         $container->setParameter('api_platform.enable_swagger_ui', $config['enable_swagger_ui']);
         $container->setParameter('api_platform.enable_re_doc', $config['enable_re_doc']);
+        $container->setParameter('api_platform.enable_scalar', $config['enable_scalar']);
         $container->setParameter('api_platform.swagger.api_keys', $config['swagger']['api_keys']);
         $container->setParameter('api_platform.swagger.persist_authorization', $config['swagger']['persist_authorization']);
+        $container->setParameter('api_platform.swagger.with_credentials', $config['swagger']['with_credentials']);
         $container->setParameter('api_platform.swagger.http_auth', $config['swagger']['http_auth']);
         if ($config['openapi']['swagger_ui_extra_configuration'] && $config['swagger']['swagger_ui_extra_configuration']) {
             throw new RuntimeException('You can not set "swagger_ui_extra_configuration" twice - in "openapi" and "swagger" section.');
         }
         $container->setParameter('api_platform.swagger_ui.extra_configuration', $config['openapi']['swagger_ui_extra_configuration'] ?: $config['swagger']['swagger_ui_extra_configuration']);
+        $container->setParameter('api_platform.scalar.extra_configuration', $config['openapi']['scalar_extra_configuration']);
     }
 
     private function registerJsonApiConfiguration(ContainerBuilder $container, array $formats, PhpFileLoader $loader, array $config): void
@@ -689,8 +715,20 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         $loader->load('jsonapi.php');
         $loader->load('state/jsonapi.php');
 
-        $container->getDefinition('api_platform.jsonapi.normalizer.item')
-            ->addArgument($config['jsonapi']['use_iri_as_id']);
+        $useIriAsId = $config['jsonapi']['use_iri_as_id'];
+        if (null === $useIriAsId) {
+            trigger_deprecation('api-platform/core', '4.4', 'Not setting "api_platform.jsonapi.use_iri_as_id" explicitly is deprecated. Its default value will change from "true" to "false" in API Platform 5.0. Set it to "true" to keep the current behavior or to "false" to use entity identifiers as the "id" field, and silence this deprecation.');
+            $useIriAsId = true;
+        }
+
+        $itemNormalizer = $container->getDefinition('api_platform.jsonapi.normalizer.item');
+        $itemNormalizer->replaceArgument(7, [JsonApiItemNormalizer::ALLOW_CLIENT_GENERATED_ID => $config['jsonapi']['allow_client_generated_id'] ?? false]);
+        $itemNormalizer->addArgument($useIriAsId);
+        $itemNormalizer->addArgument(new Reference('api_platform.jsonapi.resource_linkage_resolver'));
+
+        $itemDenormalizer = $container->getDefinition('api_platform.jsonapi.denormalizer.item');
+        $itemDenormalizer->replaceArgument(7, [JsonApiItemNormalizer::ALLOW_CLIENT_GENERATED_ID => $config['jsonapi']['allow_client_generated_id'] ?? false]);
+        $itemDenormalizer->addArgument($useIriAsId);
     }
 
     private function registerJsonLdHydraConfiguration(ContainerBuilder $container, array $formats, PhpFileLoader $loader, array $config): void
@@ -852,6 +890,13 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
     {
         $loader->load('http_cache.php');
 
+        // Concrete purger services are always registered when the http-cache package is present,
+        // so userland can decorate or inject them even when invalidation is disabled (#8095).
+        // The invalidation listener, the AddTagsProcessor and the HTTP-client wiring stay gated below.
+        if (interface_exists(PurgerInterface::class)) {
+            $loader->load('http_cache_purger.php');
+        }
+
         if (!$this->isConfigEnabled($container, $config['http_cache']['invalidation'])) {
             return;
         }
@@ -861,16 +906,13 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         }
 
         $loader->load('state/http_cache_purger.php');
-        $loader->load('http_cache_purger.php');
 
         foreach ($config['http_cache']['invalidation']['scoped_clients'] as $client) {
             $definition = $container->getDefinition($client);
             $definition->addTag('api_platform.http_cache.http_client');
         }
 
-        if (!($urls = $config['http_cache']['invalidation']['urls'])) {
-            $urls = $config['http_cache']['invalidation']['varnish_urls'];
-        }
+        $urls = $config['http_cache']['invalidation']['urls'];
 
         foreach ($urls as $key => $url) {
             $definition = new Definition(ScopingHttpClient::class, [new Reference('http_client'), $url, ['base_uri' => $url] + $config['http_cache']['invalidation']['request_options']]);
@@ -901,9 +943,9 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
         return $formats;
     }
 
-    private function registerValidatorConfiguration(ContainerBuilder $container, array $config, PhpFileLoader $loader): void
+    private function registerValidatorConfiguration(ContainerBuilder $container, array $config, PhpFileLoader $loader, bool $mcpProviderChain): void
     {
-        if (interface_exists(ValidatorInterface::class)) {
+        if ($this->isValidatorAvailable()) {
             $loader->load('metadata/validator.php');
             $loader->load('validator/validator.php');
 
@@ -912,6 +954,10 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             }
 
             $loader->load($config['use_symfony_listeners'] ? 'validator/events.php' : 'validator/state.php');
+
+            if ($mcpProviderChain) {
+                $loader->load('mcp/validator.php');
+            }
 
             $container->registerForAutoconfiguration(ValidationGroupsGeneratorInterface::class)
                 ->addTag('api_platform.validation_groups_generator');
@@ -991,23 +1037,28 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
             throw new \LogicException('Elasticsearch support cannot be enabled as the Elasticsearch component is not installed. Try running "composer require api-platform/elasticsearch".');
         }
 
-        $clientClass = !class_exists(\Elasticsearch\Client::class)
-            // ES v7
-            ? \Elastic\Elasticsearch\Client::class
+        if ('opensearch' === $config['elasticsearch']['client']) {
+            $clientClass = \OpenSearch\Client::class; // @phpstan-ignore class.notFound
+        } elseif (!class_exists(\Elasticsearch\Client::class)) {
             // ES v8 and up
-            : \Elasticsearch\Client::class;
+            $clientClass = \Elastic\Elasticsearch\Client::class;
+        } else {
+            // ES v7
+            $clientClass = \Elasticsearch\Client::class;
+        }
 
         $clientDefinition = new Definition($clientClass);
         $container->setDefinition('api_platform.elasticsearch.client', $clientDefinition);
         $container->registerForAutoconfiguration(RequestBodySearchCollectionExtensionInterface::class)
             ->addTag('api_platform.elasticsearch.request_body_search_extension.collection');
+        $container->setParameter('api_platform.elasticsearch.client', $config['elasticsearch']['client']);
         $container->setParameter('api_platform.elasticsearch.hosts', $config['elasticsearch']['hosts']);
         $container->setParameter('api_platform.elasticsearch.ssl_ca_bundle', $config['elasticsearch']['ssl_ca_bundle']);
         $container->setParameter('api_platform.elasticsearch.ssl_verification', $config['elasticsearch']['ssl_verification']);
         $loader->load('elasticsearch.php');
     }
 
-    private function registerSecurityConfiguration(ContainerBuilder $container, array $config, PhpFileLoader $loader): void
+    private function registerSecurityConfiguration(ContainerBuilder $container, array $config, PhpFileLoader $loader, bool $mcpProviderChain): void
     {
         /** @var string[] $bundles */
         $bundles = $container->getParameter('kernel.bundles');
@@ -1020,13 +1071,26 @@ final class ApiPlatformExtension extends Extension implements PrependExtensionIn
 
         $loader->load('state/security.php');
 
-        if (interface_exists(ValidatorInterface::class)) {
+        if ($mcpProviderChain) {
+            $loader->load('mcp/security.php');
+        }
+
+        if ($this->isValidatorAvailable()) {
             $loader->load('state/security_validator.php');
+
+            if ($mcpProviderChain) {
+                $loader->load('mcp/security_validator.php');
+            }
         }
 
         if ($this->isConfigEnabled($container, $config['graphql'])) {
             $loader->load('graphql/security.php');
         }
+    }
+
+    private function isValidatorAvailable(): bool
+    {
+        return interface_exists(ValidatorInterface::class);
     }
 
     private function registerOpenApiConfiguration(ContainerBuilder $container, array $config, PhpFileLoader $loader): void

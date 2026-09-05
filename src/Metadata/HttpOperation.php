@@ -164,6 +164,7 @@ class HttpOperation extends Operation
         protected ?array $cacheHeaders = null,
         protected ?array $paginationViaCursor = null,
         protected ?array $hydraContext = null,
+        protected ?array $jsonldContext = null,
         protected bool|OpenApiOperation|Webhook|null $openapi = null,
         protected ?array $exceptionToStatus = null,
         protected ?array $links = null,
@@ -207,6 +208,7 @@ class HttpOperation extends Operation
         ?bool $validate = null,
         ?bool $write = null,
         ?bool $serialize = null,
+        ?bool $contentNegotiation = null,
         ?bool $fetchPartial = null,
         ?bool $forceEager = null,
         ?int $priority = null,
@@ -220,6 +222,7 @@ class HttpOperation extends Operation
         array|string|null $middleware = null,
         ?bool $queryParameterValidationEnabled = null,
         ?bool $jsonStream = null,
+        ?bool $throwOnNotFound = null,
         array $extraProperties = [],
         ?bool $map = null,
     ) {
@@ -265,6 +268,7 @@ class HttpOperation extends Operation
             validate: $validate,
             write: $write,
             serialize: $serialize,
+            contentNegotiation: $contentNegotiation,
             fetchPartial: $fetchPartial,
             forceEager: $forceEager,
             priority: $priority,
@@ -280,6 +284,7 @@ class HttpOperation extends Operation
             strictQueryParameterValidation: $strictQueryParameterValidation,
             hideHydraOperation: $hideHydraOperation,
             jsonStream: $jsonStream,
+            throwOnNotFound: $throwOnNotFound,
             extraProperties: $extraProperties,
             map: $map
         );
@@ -623,6 +628,19 @@ class HttpOperation extends Operation
     {
         $self = clone $this;
         $self->hydraContext = $hydraContext;
+
+        return $self;
+    }
+
+    public function getJsonldContext(): ?array
+    {
+        return $this->jsonldContext;
+    }
+
+    public function withJsonldContext(array $jsonldContext): static
+    {
+        $self = clone $this;
+        $self->jsonldContext = $jsonldContext;
 
         return $self;
     }

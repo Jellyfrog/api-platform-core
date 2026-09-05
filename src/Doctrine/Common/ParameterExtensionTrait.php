@@ -15,11 +15,13 @@ namespace ApiPlatform\Doctrine\Common;
 
 use ApiPlatform\Doctrine\Common\Filter\LoggerAwareInterface;
 use ApiPlatform\Doctrine\Common\Filter\ManagerRegistryAwareInterface;
+use ApiPlatform\Doctrine\Common\Filter\NameConverterAwareInterface;
 use ApiPlatform\Doctrine\Common\Filter\PropertyAwareFilterInterface;
 use ApiPlatform\Metadata\Parameter;
 use Doctrine\Persistence\ManagerRegistry;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 
 trait ParameterExtensionTrait
 {
@@ -28,6 +30,7 @@ trait ParameterExtensionTrait
     protected ContainerInterface $filterLocator;
     protected ?ManagerRegistry $managerRegistry = null;
     protected ?LoggerInterface $logger = null;
+    protected ?NameConverterInterface $nameConverter = null;
 
     /**
      * @param object    $filter    the filter instance to configure
@@ -43,12 +46,12 @@ trait ParameterExtensionTrait
             $filter->setLogger($this->logger);
         }
 
+        if ($this->nameConverter && $filter instanceof NameConverterAwareInterface && !$filter->hasNameConverter()) {
+            $filter->setNameConverter($this->nameConverter);
+        }
+
         if ($filter instanceof PropertyAwareFilterInterface) {
-            $properties = [];
-            // Check if the filter has getProperties method (e.g., if it's an AbstractFilter)
-            if (method_exists($filter, 'getProperties')) { // @phpstan-ignore-line todo 5.x remove this check @see interface
-                $properties = $filter->getProperties() ?? [];
-            }
+            $properties = $filter->getProperties() ?? [];
 
             $propertyKey = $parameter->getProperty() ?? $parameter->getKey();
             foreach ($parameter->getProperties() ?? [$propertyKey] as $property) {

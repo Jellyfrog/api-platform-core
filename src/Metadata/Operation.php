@@ -792,6 +792,7 @@ abstract class Operation extends Metadata
         protected ?bool $validate = null,
         protected ?bool $write = null,
         protected ?bool $serialize = null,
+        protected ?bool $contentNegotiation = null,
         protected ?bool $fetchPartial = null,
         protected ?bool $forceEager = null,
         /**
@@ -813,6 +814,7 @@ abstract class Operation extends Metadata
         protected ?bool $strictQueryParameterValidation = null,
         protected ?bool $hideHydraOperation = null,
         protected ?bool $jsonStream = null,
+        protected ?bool $throwOnNotFound = null,
         protected array $extraProperties = [],
         ?bool $map = null,
     ) {
@@ -861,6 +863,7 @@ abstract class Operation extends Metadata
             strictQueryParameterValidation: $strictQueryParameterValidation,
             hideHydraOperation: $hideHydraOperation,
             jsonStream: $jsonStream,
+            throwOnNotFound: $throwOnNotFound,
             extraProperties: $extraProperties,
             map: $map
         );
@@ -932,6 +935,19 @@ abstract class Operation extends Metadata
     {
         $self = clone $this;
         $self->serialize = $serialize;
+
+        return $self;
+    }
+
+    public function canNegotiateContent(): ?bool
+    {
+        return $this->contentNegotiation;
+    }
+
+    public function withContentNegotiation(bool $contentNegotiation = true): static
+    {
+        $self = clone $this;
+        $self->contentNegotiation = $contentNegotiation;
 
         return $self;
     }

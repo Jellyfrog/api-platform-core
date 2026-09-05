@@ -34,6 +34,7 @@ use ApiPlatform\Doctrine\Orm\Filter\UuidBinaryFilter;
 use ApiPlatform\Doctrine\Orm\Filter\UuidFilter;
 use ApiPlatform\Doctrine\Orm\Metadata\Property\DoctrineOrmPropertyMetadataFactory;
 use ApiPlatform\Doctrine\Orm\Metadata\Resource\DoctrineOrmLinkFactory;
+use ApiPlatform\Doctrine\Orm\Metadata\Resource\DoctrineOrmParameterResourceMetadataCollectionFactory;
 use ApiPlatform\Doctrine\Orm\Metadata\Resource\DoctrineOrmResourceCollectionMetadataFactory;
 use ApiPlatform\Doctrine\Orm\Serializer\DoctrineOrmOperationResourceClassResolver;
 use ApiPlatform\Doctrine\Orm\State\CollectionProvider;
@@ -198,6 +199,7 @@ return function (ContainerConfigurator $container) {
             service('api_platform.filter_locator'),
             service('doctrine')->nullOnInvalid(),
             service('logger')->nullOnInvalid(),
+            service('api_platform.name_converter')->nullOnInvalid(),
         ])
         ->tag('api_platform.doctrine.orm.query_extension.collection', ['priority' => -16])
         ->tag('api_platform.doctrine.orm.query_extension.item', ['priority' => -9]);
@@ -275,6 +277,13 @@ return function (ContainerConfigurator $container) {
             service('api_platform.metadata.property.name_collection_factory'),
             service('api_platform.resource_class_resolver'),
             service('api_platform.doctrine.orm.metadata.resource.link_factory.inner'),
+        ]);
+
+    $services->set('api_platform.doctrine.orm.metadata.resource.parameter_metadata_collection_factory', DoctrineOrmParameterResourceMetadataCollectionFactory::class)
+        ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 998)
+        ->args([
+            service('doctrine'),
+            service('api_platform.doctrine.orm.metadata.resource.parameter_metadata_collection_factory.inner'),
         ]);
 
     $services->set('api_platform.doctrine.orm.links_handler', LinksHandler::class)

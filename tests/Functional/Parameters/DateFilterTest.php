@@ -13,6 +13,8 @@ declare(strict_types=1);
 
 namespace ApiPlatform\Tests\Functional\Parameters;
 
+use ApiPlatform\Doctrine\Orm\Filter\AbstractFilter;
+use ApiPlatform\Doctrine\Orm\Filter\DateFilter;
 use ApiPlatform\Symfony\Bundle\Test\ApiTestCase;
 use ApiPlatform\Tests\Fixtures\TestBundle\Document\FilteredDateParameter as FilteredDateParameterDocument;
 use ApiPlatform\Tests\Fixtures\TestBundle\Entity\FilteredDateParameter;
@@ -34,6 +36,15 @@ final class DateFilterTest extends ApiTestCase
     public static function getResources(): array
     {
         return [FilteredDateParameter::class];
+    }
+
+    public function testDateFilterIsStandalone(): void
+    {
+        self::assertNotContains(
+            AbstractFilter::class,
+            class_parents(DateFilter::class) ?: [],
+            'DateFilter must not extend the deprecated AbstractFilter (5.0 standalone rewrite).'
+        );
     }
 
     /**
@@ -76,6 +87,12 @@ final class DateFilterTest extends ApiTestCase
         yield 'date_alias_include_null_always_before_all_date' => ['/filtered_date_parameters?date_include_null_always[before]=2024-12-31', 4];
         yield 'date_alias_old_way' => ['/filtered_date_parameters?date_old_way[before]=2024-06-14', 2];
         yield 'date_alias_old_way_after_last_one' => ['/filtered_date_parameters?date_old_way[after]=2024-12-31', 1];
+        // ComparisonFilter(ExactFilter) on date column
+        yield 'comparison_gt' => ['/filtered_date_parameters?createdAtComparison[gt]=2024-01-01', 2];
+        yield 'comparison_gte' => ['/filtered_date_parameters?createdAtComparison[gte]=2024-01-01', 3];
+        yield 'comparison_lt' => ['/filtered_date_parameters?createdAtComparison[lt]=2024-12-25', 2];
+        yield 'comparison_lte' => ['/filtered_date_parameters?createdAtComparison[lte]=2024-12-25', 3];
+        yield 'comparison_gt_and_lt' => ['/filtered_date_parameters?createdAtComparison[gt]=2024-01-01&createdAtComparison[lt]=2024-12-25', 1];
     }
 
     #[DataProvider('dateFilterNullAndEmptyScenariosProvider')]

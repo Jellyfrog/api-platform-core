@@ -36,6 +36,11 @@ final class ExactFilter implements FilterInterface, OpenApiParameterFilterInterf
         $parameter = $context['parameter'];
         $value = $parameter->getValue();
 
+        // associative arrays are operator-maps owned by ComparisonFilter/DateFilter, not equality
+        if (\is_array($value) && !array_is_list($value)) {
+            return;
+        }
+
         if (null === $parameter->getProperty()) {
             throw new InvalidArgumentException(\sprintf('The filter parameter with key "%s" must specify a property. Please provide the property explicitly.', $parameter->getKey()));
         }
@@ -46,12 +51,34 @@ final class ExactFilter implements FilterInterface, OpenApiParameterFilterInterf
 
         [$alias, $property] = $this->addNestedParameterJoins($property, $alias, $queryBuilder, $queryNameGenerator, $parameter);
 
+        if (ComparisonFilter::OPERATOR_BETWEEN === ($context['operator'] ?? null)) {
+            $whereClause = $context['whereClause'] ?? 'andWhere';
+
+            // equal bounds collapse to an equality so the optimizer skips the range scan
+            if ($value[0] === $value[1]) {
+                $queryBuilder->{$whereClause}(\sprintf('%s.%s = :%s', $alias, $property, $parameterName))
+                    ->setParameter($parameterName, $value[0]);
+
+                return;
+            }
+
+            $queryBuilder->{$whereClause}(\sprintf('%1$s.%2$s BETWEEN :%3$s_1 AND :%3$s_2', $alias, $property, $parameterName))
+                ->setParameter($parameterName.'_1', $value[0])
+                ->setParameter($parameterName.'_2', $value[1]);
+
+            return;
+        }
+
         if (\is_array($value)) {
             $queryBuilder
                 ->{$context['whereClause'] ?? 'andWhere'}(\sprintf('%s.%s IN (:%s)', $alias, $property, $parameterName));
         } else {
+            $operator = $context['operator'] ?? '=';
+            if (!\in_array($operator, ComparisonFilter::ALLOWED_DQL_OPERATORS, true)) {
+                throw new InvalidArgumentException(\sprintf('Unsupported operator "%s".', $operator));
+            }
             $queryBuilder
-                ->{$context['whereClause'] ?? 'andWhere'}(\sprintf('%s.%s = :%s', $alias, $property, $parameterName));
+                ->{$context['whereClause'] ?? 'andWhere'}(\sprintf('%s.%s %s :%s', $alias, $property, $operator, $parameterName));
         }
 
         $queryBuilder->setParameter($parameterName, $value);

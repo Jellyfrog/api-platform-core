@@ -19,6 +19,7 @@ use ApiPlatform\Metadata\Operation;
 use ApiPlatform\State\ProcessorInterface;
 use ApiPlatform\State\SerializerContextBuilderInterface;
 use Mcp\Schema\Content\TextContent;
+use Mcp\Schema\Content\TextResourceContents;
 use Mcp\Schema\JsonRpc\Response;
 use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Result\ReadResourceResult;
@@ -40,12 +41,7 @@ final class StructuredContentProcessor implements ProcessorInterface
 
     public function process(mixed $data, Operation $operation, array $uriVariables = [], array $context = [])
     {
-        if (
-            !$this->serializer instanceof NormalizerInterface
-            || !$this->serializer instanceof EncoderInterface
-            || !isset($context['mcp_request'])
-            || !($request = $context['request'])
-        ) {
+        if (!isset($context['mcp_request'])) {
             return $this->decorated->process($data, $operation, $uriVariables, $context);
         }
 
@@ -55,20 +51,34 @@ final class StructuredContentProcessor implements ProcessorInterface
             return new Response($context['mcp_request']->getId(), $result);
         }
 
+        $request = $context['request'] ?? null;
         $context['original_data'] = $result;
         $class = $operation->getClass();
         $includeStructuredContent = $operation instanceof McpTool || $operation instanceof McpResource ? $operation->getStructuredContent() ?? true : false;
         $structuredContent = null;
 
-        if ($includeStructuredContent) {
+        if ($request && $this->serializer instanceof NormalizerInterface && $this->serializer instanceof EncoderInterface) {
             $serializerContext = $this->serializerContextBuilder->createFromRequest($request, true, [
                 'resource_class' => $class,
                 'operation' => $operation,
             ]);
             $serializerContext['uri_variables'] = $uriVariables;
             $format = $request->getRequestFormat('') ?: 'jsonld';
-            $structuredContent = $this->serializer->normalize($result, $format, $serializerContext);
-            $result = $this->serializer->encode($structuredContent, $format, $serializerContext);
+            $normalized = $this->serializer->normalize($result, $format, $serializerContext);
+            $result = $this->serializer->encode($normalized, $format, $serializerContext);
+
+            if ($includeStructuredContent) {
+                $structuredContent = $normalized;
+            }
+        }
+
+        if ($operation instanceof McpResource) {
+            return new Response(
+                $context['mcp_request']->getId(),
+                new ReadResourceResult([
+                    new TextResourceContents($operation->getUri(), $operation->getMimeType() ?? 'application/json', $result),
+                ]),
+            );
         }
 
         return new Response(

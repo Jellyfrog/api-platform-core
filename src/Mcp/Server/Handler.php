@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace ApiPlatform\Mcp\Server;
 
 use ApiPlatform\Mcp\State\ToolProvider;
+use ApiPlatform\Metadata\Exception\HttpExceptionInterface;
 use ApiPlatform\Metadata\HttpOperation;
 use ApiPlatform\Metadata\Operation\Factory\OperationMetadataFactoryInterface;
 use ApiPlatform\State\ProcessorInterface;
@@ -49,7 +50,15 @@ final class Handler implements RequestHandlerInterface
 
     public function supports(Request $request): bool
     {
-        return $request instanceof CallToolRequest || $request instanceof ReadResourceRequest;
+        if ($request instanceof CallToolRequest) {
+            return null !== $this->operationMetadataFactory->create($request->name);
+        }
+
+        if ($request instanceof ReadResourceRequest) {
+            return null !== $this->operationMetadataFactory->create($request->uri);
+        }
+
+        return false;
     }
 
     /**
@@ -66,12 +75,16 @@ final class Handler implements RequestHandlerInterface
         } else {
             \assert($request instanceof CallToolRequest);
             $operationNameOrUri = $request->name;
-            $arguments = $request->arguments ?? [];
+            $arguments = $request->arguments;
             $this->logger->debug('Executing tool', ['name' => $operationNameOrUri, 'arguments' => $arguments]);
         }
 
-        /** @var HttpOperation $operation */
+        /** @var HttpOperation|null $operation */
         $operation = $this->operationMetadataFactory->create($operationNameOrUri);
+
+        if (null === $operation) {
+            return Error::forMethodNotFound(\sprintf('MCP operation "%s" not found.', $operationNameOrUri), $request->getId());
+        }
 
         $uriVariables = [];
         if (!$isResource) {
@@ -83,14 +96,24 @@ final class Handler implements RequestHandlerInterface
         }
 
         $context = [
-            'request' => ($httpRequest = $this->requestStack->getCurrentRequest()),
+            'request' => $this->requestStack->getCurrentRequest(),
             'mcp_request' => $request,
+            'mcp_session' => $session,
             'uri_variables' => $uriVariables,
             'resource_class' => $operation->getClass(),
         ];
 
         if (!$isResource) {
             $context['mcp_data'] = $arguments;
+        }
+
+        $operation = $operation->withExtraProperties(
+            array_merge($operation->getExtraProperties(), ['_api_disable_swagger_provider' => true])
+        );
+
+        // MCP has its own transport (JSON-RPC) — HTTP content negotiation is irrelevant.
+        if (null === $operation->canNegotiateContent()) {
+            $operation = $operation->withContentNegotiation(false);
         }
 
         if (null === $operation->canValidate()) {
@@ -109,9 +132,17 @@ final class Handler implements RequestHandlerInterface
             $operation = $operation->withDeserialize(false);
         }
 
-        $body = $this->provider->provide($operation, $uriVariables, $context);
+        // The MCP transport has no HTTP response to carry a status code, so a caller-facing
+        // HttpExceptionInterface (e.g. access denied, validation) is converted into a JSON-RPC
+        // error carrying its message; anything else stays uncaught and reaches the SDK's own
+        // generic handler, which does not leak arbitrary exception messages to the client.
+        try {
+            $body = $this->provider->provide($operation, $uriVariables, $context);
+        } catch (HttpExceptionInterface $e) {
+            return Error::forInternalError($e->getMessage(), $request->getId());
+        }
 
-        if (!$isResource) {
+        if (!$isResource && null !== ($httpRequest = $context['request'] ?? null)) {
             $context['previous_data'] = $httpRequest->attributes->get('previous_data');
             $context['data'] = $httpRequest->attributes->get('data');
             $context['read_data'] = $httpRequest->attributes->get('read_data');
@@ -126,6 +157,10 @@ final class Handler implements RequestHandlerInterface
             $operation = $operation->withSerialize(false);
         }
 
-        return $this->processor->process($body, $operation, $uriVariables, $context);
+        try {
+            return $this->processor->process($body, $operation, $uriVariables, $context);
+        } catch (HttpExceptionInterface $e) {
+            return Error::forInternalError($e->getMessage(), $request->getId());
+        }
     }
 }

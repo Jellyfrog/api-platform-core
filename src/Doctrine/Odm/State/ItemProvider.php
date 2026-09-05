@@ -21,6 +21,7 @@ use ApiPlatform\Metadata\Operation;
 use ApiPlatform\Metadata\Resource\Factory\ResourceMetadataCollectionFactoryInterface;
 use ApiPlatform\State\ProviderInterface;
 use ApiPlatform\State\Util\StateOptionsTrait;
+use Doctrine\ODM\MongoDB\Aggregation\Builder as AggregationBuilder;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Doctrine\ODM\MongoDB\Repository\DocumentRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -57,7 +58,13 @@ final class ItemProvider implements ProviderInterface
 
         $fetchData = $context['fetch_data'] ?? true;
         if (!$fetchData) {
-            return $manager->getReference($documentClass, reset($uriVariables));
+            $identifier = $manager->getClassMetadata($documentClass)->identifier;
+            if ($identifier && 1 === \count($uriVariables) && \array_key_exists($identifier, $uriVariables)) {
+                return $manager->getReference($documentClass, $uriVariables[$identifier]);
+            }
+            // When URI variables don't correspond to the document identifier (e.g. custom
+            // ApiProperty identifier on a non-#[Id] field), fall through to a real lookup
+            // so that the returned document carries the actual database identifier.
         }
 
         $repository = $manager->getRepository($documentClass);
@@ -65,7 +72,19 @@ final class ItemProvider implements ProviderInterface
             throw new RuntimeException(\sprintf('The repository for "%s" must be an instance of "%s".', $documentClass, DocumentRepository::class));
         }
 
-        $aggregationBuilder = $repository->createAggregationBuilder();
+        if ($method = $this->getStateOptionsRepositoryMethod($operation)) {
+            if (!method_exists($repository, $method)) {
+                throw new RuntimeException(\sprintf('The repository method "%s::%s" does not exist.', $repository::class, $method));
+            }
+
+            $aggregationBuilder = $repository->{$method}();
+
+            if (!$aggregationBuilder instanceof AggregationBuilder) {
+                throw new RuntimeException(\sprintf('The repository method "%s" must return a %s instance.', $method, AggregationBuilder::class));
+            }
+        } else {
+            $aggregationBuilder = $repository->createAggregationBuilder();
+        }
 
         if ($handleLinks = $this->getLinksHandler($operation)) {
             $handleLinks($aggregationBuilder, $uriVariables, ['documentClass' => $documentClass, 'operation' => $operation] + $context);

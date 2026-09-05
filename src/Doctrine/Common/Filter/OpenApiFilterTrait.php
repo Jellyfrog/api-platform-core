@@ -28,8 +28,22 @@ trait OpenApiFilterTrait
             return new OpenApiParameter(name: $parameter->getKey(), in: 'query');
         }
 
-        $arraySchema = ['type' => 'array', 'items' => $schema ?? ['type' => 'string']];
+        if ('array' === ($schema['type'] ?? null)) {
+            $arraySchema = $schema;
+        } else {
+            $arraySchema = ['type' => 'array', 'items' => $schema ?? ['type' => 'string']];
+        }
 
-        return new OpenApiParameter(name: $parameter->getKey().'[]', in: 'query', style: 'deepObject', explode: true, schema: $arraySchema);
+        $arrayParameter = new OpenApiParameter(name: $parameter->getKey().'[]', in: 'query', style: 'deepObject', explode: true, schema: $arraySchema);
+
+        // When castToArray is null (default), both singular and array forms are accepted
+        if (null === $parameter->getCastToArray()) {
+            return [
+                new OpenApiParameter(name: $parameter->getKey(), in: 'query'),
+                $arrayParameter,
+            ];
+        }
+
+        return $arrayParameter;
     }
 }

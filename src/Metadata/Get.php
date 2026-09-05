@@ -44,6 +44,7 @@ final class Get extends HttpOperation
         ?array $cacheHeaders = null,
         ?array $paginationViaCursor = null,
         ?array $hydraContext = null,
+        ?array $jsonldContext = null,
         bool|OpenApiOperation|Webhook|null $openapi = null,
         ?array $exceptionToStatus = null,
         ?bool $queryParameterValidationEnabled = null,
@@ -86,6 +87,7 @@ final class Get extends HttpOperation
         ?bool $validate = null,
         ?bool $write = null,
         ?bool $serialize = null,
+        ?bool $contentNegotiation = null,
         ?bool $fetchPartial = null,
         ?bool $forceEager = null,
         ?int $priority = null,
@@ -100,6 +102,7 @@ final class Get extends HttpOperation
         ?bool $strictQueryParameterValidation = null,
         protected ?bool $hideHydraOperation = null,
         ?bool $jsonStream = null,
+        ?bool $throwOnNotFound = null,
         array $extraProperties = [],
         ?bool $map = null,
     ) {
@@ -127,6 +130,7 @@ final class Get extends HttpOperation
             cacheHeaders: $cacheHeaders,
             paginationViaCursor: $paginationViaCursor,
             hydraContext: $hydraContext,
+            jsonldContext: $jsonldContext,
             openapi: $openapi,
             exceptionToStatus: $exceptionToStatus,
             queryParameterValidationEnabled: $queryParameterValidationEnabled,
@@ -168,6 +172,7 @@ final class Get extends HttpOperation
             validate: $validate,
             write: $write,
             serialize: $serialize,
+            contentNegotiation: $contentNegotiation,
             fetchPartial: $fetchPartial,
             forceEager: $forceEager,
             priority: $priority,
@@ -182,6 +187,7 @@ final class Get extends HttpOperation
             strictQueryParameterValidation: $strictQueryParameterValidation,
             hideHydraOperation: $hideHydraOperation,
             jsonStream: $jsonStream,
+            throwOnNotFound: $throwOnNotFound,
             extraProperties: $extraProperties,
             map: $map
         );

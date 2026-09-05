@@ -19,8 +19,6 @@ use ApiPlatform\Metadata\Exception\PropertyNotFoundException;
 use ApiPlatform\Metadata\Exception\RuntimeException;
 use ApiPlatform\Metadata\Extractor\PropertyExtractorInterface;
 use PHPStan\PhpDocParser\Parser\PhpDocParser;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
-use Symfony\Component\PropertyInfo\Type as LegacyType;
 use Symfony\Component\TypeInfo\Type;
 use Symfony\Component\TypeInfo\TypeResolver\StringTypeResolver;
 
@@ -50,10 +48,7 @@ final class ExtractorPropertyMetadataFactory implements PropertyMetadataFactoryI
             }
         }
 
-        if (
-            !property_exists($resourceClass, $property) && !interface_exists($resourceClass)
-            || null === ($propertyMetadata = $this->extractor->getProperties()[$resourceClass][$property] ?? null)
-        ) {
+        if (null === ($propertyMetadata = $this->extractor->getProperties()[$resourceClass][$property] ?? null)) {
             return $this->handleNotFound($parentPropertyMetadata, $resourceClass, $property);
         }
 
@@ -64,16 +59,6 @@ final class ExtractorPropertyMetadataFactory implements PropertyMetadataFactoryI
         $apiProperty = new ApiProperty();
 
         foreach ($propertyMetadata as $key => $value) {
-            if ('builtinTypes' === $key && null !== $value) {
-                if (method_exists(PropertyInfoExtractor::class, 'getType')) {
-                    continue;
-                }
-
-                $apiProperty = $apiProperty->withBuiltinTypes(array_map(static fn (string $builtinType): LegacyType => new LegacyType($builtinType), $value));
-
-                continue;
-            }
-
             if ('nativeType' === $key && null !== $value) {
                 if (class_exists(PhpDocParser::class)) {
                     $apiProperty = $apiProperty->withNativeType((new StringTypeResolver())->resolve($value));

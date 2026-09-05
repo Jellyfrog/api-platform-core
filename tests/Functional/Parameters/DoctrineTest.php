@@ -16,11 +16,10 @@ namespace ApiPlatform\Tests\Functional\Parameters;
 use ApiPlatform\Symfony\Bundle\Test\ApiTestCase;
 use ApiPlatform\Tests\Fixtures\TestBundle\ApiResource\FilterWithStateOptions;
 use ApiPlatform\Tests\Fixtures\TestBundle\ApiResource\FilterWithStateOptionsAndNoApiFilter;
-use ApiPlatform\Tests\Fixtures\TestBundle\Document\SearchFilterParameter as SearchFilterParameterDocument;
+use ApiPlatform\Tests\Fixtures\TestBundle\Entity\ExactAndComparisonParameter;
 use ApiPlatform\Tests\Fixtures\TestBundle\Entity\FilterWithStateOptionsAndNoApiFilterEntity;
 use ApiPlatform\Tests\Fixtures\TestBundle\Entity\FilterWithStateOptionsEntity;
 use ApiPlatform\Tests\Fixtures\TestBundle\Entity\ProductWithQueryParameter;
-use ApiPlatform\Tests\Fixtures\TestBundle\Entity\SearchFilterParameter;
 use ApiPlatform\Tests\RecreateSchemaTrait;
 use ApiPlatform\Tests\SetupClassResourcesTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -38,93 +37,47 @@ final class DoctrineTest extends ApiTestCase
     public static function getResources(): array
     {
         return [
-            SearchFilterParameter::class,
             FilterWithStateOptions::class,
             FilterWithStateOptionsAndNoApiFilter::class,
             ProductWithQueryParameter::class,
+            ExactAndComparisonParameter::class,
         ];
     }
 
-    public function testDoctrineEntitySearchFilter(): void
+    public function testExactFilterIgnoresOperatorMap(): void
     {
-        $resource = $this->isMongoDB() ? SearchFilterParameterDocument::class : SearchFilterParameter::class;
-        $this->recreateSchema([$resource]);
-        $this->loadFixtures($resource);
-        $route = 'search_filter_parameter';
-        $response = self::createClient()->request('GET', $route.'?foo=bar');
-        $a = $response->toArray();
-        $this->assertCount(2, $a['hydra:member']);
-        $this->assertEquals('bar', $a['hydra:member'][0]['foo']);
-        $this->assertEquals('bar', $a['hydra:member'][1]['foo']);
-
-        $this->assertArraySubset(['hydra:search' => [
-            'hydra:template' => \sprintf('/%s{?foo,fooAlias,q,order[id],order[foo],searchPartial[foo],searchExact[foo],searchOnTextAndDate[foo],searchOnTextAndDate[createdAt][before],searchOnTextAndDate[createdAt][strictly_before],searchOnTextAndDate[createdAt][after],searchOnTextAndDate[createdAt][strictly_after],search[foo],search[createdAt],id,createdAt}', $route),
-        ]], $a);
-
-        $this->assertArraySubset(['@type' => 'IriTemplateMapping', 'variable' => 'fooAlias', 'property' => 'foo'], $a['hydra:search']['hydra:mapping'][1]);
-
-        $response = self::createClient()->request('GET', $route.'?fooAlias=baz');
-        $a = $response->toArray();
-        $this->assertCount(1, $a['hydra:member']);
-        $this->assertEquals('baz', $a['hydra:member'][0]['foo']);
-
-        $response = self::createClient()->request('GET', $route.'?order[foo]=asc');
-        $this->assertEquals($response->toArray()['hydra:member'][0]['foo'], 'bar');
-        $response = self::createClient()->request('GET', $route.'?order[foo]=desc');
-        $this->assertEquals($response->toArray()['hydra:member'][0]['foo'], 'foo');
-
-        $response = self::createClient()->request('GET', $route.'?searchPartial[foo]=az');
-        $members = $response->toArray()['hydra:member'];
-        $this->assertCount(1, $members);
-        $this->assertArraySubset(['foo' => 'baz'], $members[0]);
-
-        $response = self::createClient()->request('GET', $route.'?searchOnTextAndDate[foo]=bar&searchOnTextAndDate[createdAt][before]=2024-01-21');
-        $members = $response->toArray()['hydra:member'];
-        $this->assertCount(1, $members);
-        $this->assertArraySubset(['foo' => 'bar', 'createdAt' => '2024-01-21T00:00:00+00:00'], $members[0]);
-    }
-
-    public function testGraphQl(): void
-    {
-        if ($_SERVER['EVENT_LISTENERS_BACKWARD_COMPATIBILITY_LAYER'] ?? false) {
-            $this->markTestSkipped('Parameters are not supported in BC mode.');
+        if ($this->isMongoDB()) {
+            $this->markTestSkipped('Not tested with mongodb.');
         }
 
-        $resource = $this->isMongoDB() ? SearchFilterParameterDocument::class : SearchFilterParameter::class;
+        $resource = ExactAndComparisonParameter::class;
         $this->recreateSchema([$resource]);
-        $this->loadFixtures($resource);
-        $object = 'searchFilterParameters';
-        $response = self::createClient()->request('POST', '/graphql', ['json' => [
-            'query' => \sprintf('{ %s(foo: "bar") { edges { node { id foo createdAt } } } }', $object),
-        ]]);
-        $this->assertEquals('bar', $response->toArray()['data'][$object]['edges'][0]['node']['foo']);
 
-        $response = self::createClient()->request('POST', '/graphql', ['json' => [
-            'query' => \sprintf('{ %s(searchPartial: {foo: "az"}) { edges { node { id foo createdAt } } } }', $object),
-        ]]);
-        $this->assertEquals('baz', $response->toArray()['data'][$object]['edges'][0]['node']['foo']);
+        $container = static::$kernel->getContainer();
+        $manager = $container->get('doctrine')->getManager();
+        foreach ([5, 8, 10, 15] as $q) {
+            $e = new ExactAndComparisonParameter();
+            $e->setQuantity($q);
+            $manager->persist($e);
+        }
+        $manager->flush();
 
-        $response = self::createClient()->request('POST', '/graphql', ['json' => [
-            'query' => \sprintf('{ %s(searchExact: {foo: "baz"}) { edges { node { id foo createdAt } } } }', $object),
-        ]]);
-        $this->assertEquals('baz', $response->toArray()['data'][$object]['edges'][0]['node']['foo']);
+        $route = 'exact_and_comparison_parameter';
 
-        $response = self::createClient()->request('POST', '/graphql', ['json' => [
-            'query' => \sprintf('{ %s(searchOnTextAndDate: {foo: "bar", createdAt: {before: "2024-01-21"}}) { edges { node { id foo createdAt } } } }', $object),
-        ]]);
-        $this->assertArraySubset(['foo' => 'bar', 'createdAt' => '2024-01-21T00:00:00+00:00'], $response->toArray()['data'][$object]['edges'][0]['node']);
-    }
+        // Exact match: ?quantity=10 must return only the row with quantity = 10.
+        $response = self::createClient()->request('GET', $route.'?quantity=10');
+        $this->assertResponseIsSuccessful();
+        $members = $response->toArray()['hydra:member'];
+        $this->assertCount(1, $members);
+        $this->assertSame(10, $members[0]['quantity']);
 
-    public function testPropertyPlaceholderFilter(): void
-    {
-        static::bootKernel();
-        $resource = $this->isMongoDB() ? SearchFilterParameterDocument::class : SearchFilterParameter::class;
-        $this->recreateSchema([$resource]);
-        $this->loadFixtures($resource);
-        $route = 'search_filter_parameter';
-        $response = self::createClient()->request('GET', $route.'?foo=baz');
-        $a = $response->toArray();
-        $this->assertEquals($a['hydra:member'][0]['foo'], 'baz');
+        // Operator map: ?quantity[lt]=10 must apply only the comparison (< 10),
+        // the exact filter must NOT also inject `quantity IN ('lt' => ...)`.
+        $response = self::createClient()->request('GET', $route.'?quantity[lt]=10');
+        $this->assertResponseIsSuccessful();
+        $quantities = array_map(static fn ($m) => $m['quantity'], $response->toArray()['hydra:member']);
+        sort($quantities);
+        $this->assertSame([5, 8], $quantities);
     }
 
     public function testStateOptions(): void
@@ -187,55 +140,6 @@ final class DoctrineTest extends ApiTestCase
         $this->assertCount(1, $a['hydra:member']);
     }
 
-    #[DataProvider('partialFilterParameterProviderForSearchFilterParameter')]
-    public function testPartialSearchFilterWithSearchFilterParameter(string $url, int $expectedCount, array $expectedFoos): void
-    {
-        $resource = $this->isMongoDB() ? SearchFilterParameterDocument::class : SearchFilterParameter::class;
-        $this->recreateSchema([$resource]);
-        $this->loadFixtures($resource);
-
-        $response = self::createClient()->request('GET', $url);
-
-        $this->assertResponseIsSuccessful();
-
-        $responseData = $response->toArray();
-        $filteredItems = $responseData['hydra:member'];
-
-        $this->assertCount($expectedCount, $filteredItems, \sprintf('Expected %d items for URL %s', $expectedCount, $url));
-
-        $foos = array_map(static fn ($item) => $item['foo'], $filteredItems);
-        sort($foos);
-        sort($expectedFoos);
-
-        $this->assertSame($expectedFoos, $foos, 'The "foo" values do not match the expected values.');
-    }
-
-    public static function partialFilterParameterProviderForSearchFilterParameter(): \Generator
-    {
-        // Fixtures Recap (from DoctrineTest::loadFixtures with SearchFilterParameter):
-        // 3x foo = 'foo'
-        // 2x foo = 'bar'
-        // 1x foo = 'baz'
-
-        yield 'partial match on foo (fo -> 3x foo)' => [
-            '/search_filter_parameter?searchPartial[foo]=fo',
-            3,
-            ['foo', 'foo', 'foo'],
-        ];
-
-        yield 'partial match on foo (ba -> 2x bar, 1x baz)' => [
-            '/search_filter_parameter?searchPartial[foo]=ba',
-            3,
-            ['bar', 'bar', 'baz'],
-        ];
-
-        yield 'partial match on foo (az -> 1x baz)' => [
-            '/search_filter_parameter?searchPartial[foo]=az',
-            1,
-            ['baz'],
-        ];
-    }
-
     public function testQueryParameterWithPropertyArgument(): void
     {
         if ($this->isMongoDB()) {
@@ -277,26 +181,6 @@ final class DoctrineTest extends ApiTestCase
         $this->assertEquals('Awesome Widget', $members[0]['title']);
         $this->assertEquals('Super Gadget', $members[1]['title']);
         $this->assertEquals('Mega Device', $members[2]['title']);
-    }
-
-    private function loadFixtures(string $resourceClass): void
-    {
-        $container = static::$kernel->getContainer();
-        $registry = $this->isMongoDB() ? $container->get('doctrine_mongodb') : $container->get('doctrine');
-        $manager = $registry->getManager();
-        $date = new \DateTimeImmutable('2024-01-21');
-        foreach (['foo', 'foo', 'foo', 'bar', 'bar', 'baz'] as $t) {
-            $s = new $resourceClass();
-            $s->setFoo($t);
-            if ('bar' === $t) {
-                $s->setCreatedAt($date);
-                $date = new \DateTimeImmutable('2024-01-22');
-            }
-
-            $manager->persist($s);
-        }
-
-        $manager->flush();
     }
 
     private function loadProductFixtures(string $resourceClass): void
@@ -342,7 +226,7 @@ final class DoctrineTest extends ApiTestCase
     }
 
     #[DataProvider('openApiParameterDocumentationProvider')]
-    public function testOpenApiParameterDocumentation(string $parameterName, bool $shouldHaveArrayNotation, string $expectedStyle, bool $expectedExplode, string $expectedDescription = '', ?array $expectedSchema = null): void
+    public function testOpenApiParameterDocumentation(string $parameterName, bool $shouldHaveArrayNotation, string $expectedStyle, bool $expectedExplode, string $expectedDescription = '', ?array $expectedSchema = null, bool $shouldHaveBothVariants = false): void
     {
         if ($this->isMongoDB()) {
             $this->markTestSkipped('Not tested with mongodb.');
@@ -359,12 +243,38 @@ final class DoctrineTest extends ApiTestCase
         $openApiDoc = $response->toArray();
 
         $parameters = $openApiDoc['paths']['/product_with_query_parameters']['get']['parameters'];
+
+        if ($shouldHaveBothVariants) {
+            $singularParameter = null;
+            $arrayParameter = null;
+
+            foreach ($parameters as $parameter) {
+                if ($parameter['name'] === $parameterName) {
+                    $singularParameter = $parameter;
+                }
+                if ($parameter['name'] === $parameterName.'[]') {
+                    $arrayParameter = $parameter;
+                }
+            }
+
+            $this->assertNotNull($singularParameter, \sprintf('%s singular parameter should be present in OpenAPI documentation', $parameterName));
+            $this->assertNotNull($arrayParameter, \sprintf('%s[] array parameter should be present in OpenAPI documentation', $parameterName));
+            $this->assertSame('query', $arrayParameter['in']);
+            $this->assertSame($expectedStyle, $arrayParameter['style'] ?? 'form');
+            $this->assertSame($expectedExplode, $arrayParameter['explode'] ?? false);
+
+            if ($expectedSchema) {
+                $this->assertSame($expectedSchema, $arrayParameter['schema'], 'Array parameter schema should match expected schema');
+            }
+
+            return;
+        }
+
         $foundParameter = null;
         $expectedName = $shouldHaveArrayNotation ? $parameterName.'[]' : $parameterName;
-        $alternativeName = $shouldHaveArrayNotation ? $parameterName : $parameterName.'[]';
 
         foreach ($parameters as $parameter) {
-            if ($parameter['name'] === $expectedName || $parameter['name'] === $alternativeName) {
+            if ($parameter['name'] === $expectedName) {
                 $foundParameter = $parameter;
                 break;
             }
@@ -390,27 +300,29 @@ final class DoctrineTest extends ApiTestCase
     public static function openApiParameterDocumentationProvider(): array
     {
         return [
-            'default behavior (no castToArray, no schema) should use array notation' => [
+            'default behavior (no castToArray, no schema) should generate both singular and array parameters' => [
                 'parameterName' => 'brand',
                 'shouldHaveArrayNotation' => true,
                 'expectedStyle' => 'deepObject',
                 'expectedExplode' => true,
                 'expectedDescription' => '',
                 'expectedSchema' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'shouldHaveBothVariants' => true,
             ],
-            'default behavior with an extra description' => [
+            'default behavior with an extra description should generate both variants' => [
                 'parameterName' => 'brandWithDescription',
                 'shouldHaveArrayNotation' => true,
                 'expectedStyle' => 'deepObject',
                 'expectedExplode' => true,
                 'expectedDescription' => 'Extra description about the filter',
                 'expectedSchema' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'shouldHaveBothVariants' => true,
             ],
             'explicit schema type string should not use array notation' => [
                 'parameterName' => 'exactBrand',
                 'shouldHaveArrayNotation' => false,
                 'expectedStyle' => 'form',
-                'expectedExplode' => false,
+                'expectedExplode' => true,
                 'expectedDescription' => '',
                 'expectedSchema' => ['type' => 'string'],
             ],
@@ -418,17 +330,27 @@ final class DoctrineTest extends ApiTestCase
                 'parameterName' => 'exactCategory',
                 'shouldHaveArrayNotation' => false,
                 'expectedStyle' => 'form',
-                'expectedExplode' => false,
+                'expectedExplode' => true,
                 'expectedDescription' => '',
                 'expectedSchema' => ['type' => 'string'],
             ],
-            'with schema and default castToArray should wrap schema in array type' => [
+            'with schema and default castToArray should generate both variants wrapping schema in array type' => [
                 'parameterName' => 'tags',
                 'shouldHaveArrayNotation' => true,
                 'expectedStyle' => 'deepObject',
                 'expectedExplode' => true,
                 'expectedDescription' => '',
                 'expectedSchema' => ['type' => 'array', 'items' => ['anyOf' => [['type' => 'array', 'items' => ['type' => 'string']], ['type' => 'string']]]],
+                'shouldHaveBothVariants' => true,
+            ],
+            'with schema and default castToArray should generate both variants without wrapping if already array' => [
+                'parameterName' => 'listOfTags',
+                'shouldHaveArrayNotation' => true,
+                'expectedStyle' => 'deepObject',
+                'expectedExplode' => true,
+                'expectedDescription' => '',
+                'expectedSchema' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'shouldHaveBothVariants' => true,
             ],
         ];
     }

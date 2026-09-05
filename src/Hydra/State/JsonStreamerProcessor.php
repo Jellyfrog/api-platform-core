@@ -59,6 +59,7 @@ final class JsonStreamerProcessor implements ProcessorInterface
         private readonly string $enabledParameterName = 'pagination',
         private readonly int $urlGenerationStrategy = UrlGeneratorInterface::ABS_PATH,
         ?ResourceMetadataCollectionFactoryInterface $resourceMetadataCollectionFactory = null,
+        private readonly bool $enableHeadRequestOptimization = true,
     ) {
         $this->resourceClassResolver = $resourceClassResolver;
         $this->iriConverter = $iriConverter;
@@ -79,6 +80,16 @@ final class JsonStreamerProcessor implements ProcessorInterface
             return $this->processor?->process($data, $operation, $uriVariables, $context);
         }
 
+        if ($this->enableHeadRequestOptimization && $request->isMethod('HEAD')) {
+            $response = new Response(
+                null,
+                $this->getStatus($request, $operation, $context),
+                $this->getHeaders($request, $operation, $context)
+            );
+
+            return $this->processor ? $this->processor->process($response, $operation, $uriVariables, $context) : $response;
+        }
+
         if ($operation instanceof CollectionOperationInterface) {
             $requestUri = $request->getRequestUri() ?? '';
             $collection = new Collection();
@@ -91,7 +102,7 @@ final class JsonStreamerProcessor implements ProcessorInterface
             }
 
             if ($data instanceof PaginatorInterface) {
-                $collection->totalItems = $data->getTotalItems();
+                $collection->totalItems = (int) $data->getTotalItems();
             }
 
             if (\is_array($data) || ($data instanceof \Countable && !$data instanceof PartialPaginatorInterface)) {

@@ -18,7 +18,6 @@ use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Component\Config\Loader\LoaderInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\HttpKernel\Bundle\Bundle;
 use Symfony\Component\HttpKernel\Kernel;
 
 /**
@@ -34,7 +33,6 @@ class AppKernel extends Kernel
     {
         parent::__construct($environment, $debug);
 
-        // patch for behat/symfony2-extension not supporting %env(APP_ENV)%
         $this->environment = $_SERVER['APP_ENV'] ?? $environment;
     }
 
@@ -43,12 +41,6 @@ class AppKernel extends Kernel
         return [
             new FrameworkBundle(),
             new DoctrineMongoDBBundle(),
-            new class extends Bundle {
-                public function shutdown(): void
-                {
-                    restore_exception_handler();
-                }
-            },
         ];
     }
 

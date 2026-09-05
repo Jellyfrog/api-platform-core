@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace ApiPlatform\Metadata\Resource\Factory;
 
+use ApiPlatform\Doctrine\Common\Filter\ManagerRegistryAwareInterface;
 use ApiPlatform\Doctrine\Common\Filter\PropertyAwareFilterInterface;
 use ApiPlatform\Metadata\ApiProperty;
 use ApiPlatform\Metadata\Exception\RuntimeException;
@@ -27,6 +28,7 @@ use ApiPlatform\Metadata\PropertiesAwareInterface;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
 use ApiPlatform\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
 use ApiPlatform\Metadata\Resource\ResourceMetadataCollection;
+use ApiPlatform\Metadata\ResourceClassResolverInterface;
 use ApiPlatform\Metadata\Util\ResourceClassInfoTrait;
 use ApiPlatform\OpenApi\Model\Parameter as OpenApiParameter;
 use ApiPlatform\Serializer\Filter\FilterInterface as SerializerFilterInterface;
@@ -55,7 +57,10 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
         private readonly ?ContainerInterface $filterLocator = null,
         private readonly ?NameConverterInterface $nameConverter = null,
         private readonly ?LoggerInterface $logger = null,
+        ?ResourceClassResolverInterface $resourceClassResolver = null,
     ) {
+        $this->resourceClassResolver = $resourceClassResolver;
+        $this->resourceMetadataFactory = $this->decorated;
     }
 
     public function create(string $resourceClass): ResourceMetadataCollection
@@ -109,7 +114,9 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
         if ($parameter) {
             $paramKey = $parameter->getProperties() ? ($parameter->getKey() ?? '') : ($parameter->getProperty() ?? $parameter->getKey() ?? '');
         }
-        $k = $resourceClass.$paramKey.(\is_string($parameter->getFilter()) ? $parameter->getFilter() : '').$filterClass;
+        // Include properties list so repeated `:property` templates with disjoint properties get distinct cache entries.
+        $paramProperties = $parameter?->getProperties() ? '['.implode(',', $parameter->getProperties()).']' : '';
+        $k = $resourceClass.$paramKey.$paramProperties.(\is_string($parameter->getFilter()) ? $parameter->getFilter() : '').$filterClass;
         if (isset($this->localPropertyCache[$k])) {
             return $this->localPropertyCache[$k];
         }
@@ -206,13 +213,7 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
         }
 
         if (($filter = $this->getFilterInstance($parameter->getFilter())) && $filter instanceof PropertyAwareFilterInterface) {
-            if (!method_exists($filter, 'getProperties')) { // @phpstan-ignore-line todo 5.x remove this check
-                trigger_deprecation('api-platform/core', 'In API Platform 5.0 "%s" will implement a method named "getProperties"', PropertyAwareFilterInterface::class);
-                $refl = new \ReflectionClass($filter);
-                $filterProperties = $refl->hasProperty('properties') ? $refl->getProperty('properties')->getValue($filter) : [];
-            } else {
-                $filterProperties = array_keys($filter->getProperties() ?? []);
-            }
+            $filterProperties = array_keys($filter->getProperties() ?? []);
 
             foreach ($filterProperties as $prop) {
                 if (!\in_array($prop, $propertyNames, true)) {
@@ -311,6 +312,14 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
                 }
             }
 
+            if ($parameter->getCastToNativeType() && null === $parameter->getCastFn()) {
+                $propertyKey = $parameter->getProperty() ?? $key;
+                $propNativeType = ($properties[$propertyKey] ?? null)?->getNativeType();
+                if ($propNativeType && $propNativeType->isIdentifiedBy(\DateTimeInterface::class)) {
+                    $parameter = $parameter->withCastFn([ValueCaster::class, 'toDateTime']);
+                }
+            }
+
             $priority = $parameter->getPriority() ?? $internalPriority--;
             $parameters->add($key, $parameter->withPriority($priority));
         }
@@ -334,7 +343,8 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
             $parameter = $parameter->withSchema($schema);
         }
 
-        if (null === $parameter->getOpenApi() && $filter instanceof OpenApiParameterFilterInterface && ($openApiParameter = $filter->getOpenApiParameters($parameter))) {
+        if (null === $parameter->getOpenApi() && $filter instanceof OpenApiParameterFilterInterface
+            && class_exists(OpenApiParameter::class) && ($openApiParameter = $filter->getOpenApiParameters($parameter))) {
             $parameter = $parameter->withOpenApi($openApiParameter);
         }
 
@@ -359,43 +369,42 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
         }
 
         // Transfer nested property metadata from ApiProperty to Parameter
+        // Always use nested_properties_info (plural) as a map keyed by original property path
         $propertyKey = $parameter->getProperty() ?? $key;
+        $nestedPropertiesInfo = [];
         if (isset($properties[$propertyKey])) {
             $apiPropertyExtraProps = $properties[$propertyKey]->getExtraProperties();
             if (isset($apiPropertyExtraProps['nested_property_info'])) {
                 $nestedInfo = $apiPropertyExtraProps['nested_property_info'];
-                $parameter = $parameter->withExtraProperties([
-                    ...$parameter->getExtraProperties(),
-                    'nested_property_info' => $nestedInfo,
-                ]);
+                $nestedPropertiesInfo[$propertyKey] = $nestedInfo;
 
                 $fullPath = implode('.', [...$nestedInfo['converted_relation_segments'], $nestedInfo['leaf_property']]);
                 $parameter = $parameter->withProperty($fullPath);
             }
         } else {
-            // For parameters with plural properties (e.g. FreeTextQueryFilter), build a map
-            // so that sub-parameters created via withProperty() can look up their nested info
-            $nestedPropertiesInfo = [];
             foreach ($properties as $propPath => $apiProperty) {
                 $apiPropExtra = $apiProperty->getExtraProperties();
                 if (isset($apiPropExtra['nested_property_info'])) {
                     $nestedPropertiesInfo[$propPath] = $apiPropExtra['nested_property_info'];
                 }
             }
+        }
 
-            if ($nestedPropertiesInfo) {
-                $parameter = $parameter->withExtraProperties([
-                    ...$parameter->getExtraProperties(),
-                    'nested_properties_info' => $nestedPropertiesInfo,
-                ]);
-            }
+        if ($nestedPropertiesInfo) {
+            $parameter = $parameter->withExtraProperties([
+                ...$parameter->getExtraProperties(),
+                'nested_properties_info' => $nestedPropertiesInfo,
+            ]);
         }
 
         if ($this->nameConverter && $property = $parameter->getProperty()) {
             // Skip name conversion if we already have nested property info
             $paramExtraProps = $parameter->getExtraProperties();
-            if (!isset($paramExtraProps['nested_property_info'])) {
-                $parameter = $parameter->withProperty($this->nameConverter->normalize($property));
+            if (!isset($paramExtraProps['nested_properties_info'])) {
+                // Keep the original (non name-converted) property to build the query while the public property matches the API naming convention.
+                $parameter = $parameter
+                    ->withExtraProperties([...$paramExtraProps, 'query_property' => $property])
+                    ->withProperty($this->nameConverter->normalize($property));
             }
         }
 
@@ -409,7 +418,13 @@ final class ParameterResourceMetadataCollectionFactory implements ResourceMetada
             try {
                 return $this->getLegacyFilterMetadata($parameter, $operation, $filter);
             } catch (RuntimeException $exception) {
-                $this->logger?->alert($exception->getMessage(), ['exception' => $exception]);
+                // An inline filter instance never gets a ManagerRegistry, unlike one resolved as a service
+                // through the filter locator: failing to describe it is expected, not an alert-worthy event.
+                if ($filter instanceof ManagerRegistryAwareInterface && !$filter->hasManagerRegistry()) {
+                    $this->logger?->debug($exception->getMessage(), ['exception' => $exception]);
+                } else {
+                    $this->logger?->alert($exception->getMessage(), ['exception' => $exception]);
+                }
 
                 return $parameter;
             }

@@ -20,6 +20,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase;
 use Workbench\App\Models\Book;
+use Workbench\App\Models\BookWithMethodCasts;
+use Workbench\App\Models\Device;
 
 /**
  * @author Tobias Oitzinger <tobiasoitzinger@gmail.com>
@@ -79,5 +81,42 @@ final class ModelMetadataTest extends TestCase
 
         $metadata = new ModelMetadata();
         $this->assertCount(1, $metadata->getRelations($model));
+    }
+
+    /**
+     * Casts defined via the casts() method (Laravel 11+) should be detected
+     * just like those defined via the $casts property.
+     *
+     * @see https://github.com/api-platform/core/issues/7662
+     */
+    public function testCastsMethodIsDetected(): void
+    {
+        // Use newInstanceWithoutConstructor to replicate how API Platform creates models
+        $refl = new \ReflectionClass(BookWithMethodCasts::class);
+        $model = $refl->newInstanceWithoutConstructor();
+
+        $metadata = new ModelMetadata();
+        $attributes = $metadata->getAttributes($model);
+
+        $this->assertSame('boolean', $attributes['is_available']['cast']);
+        $this->assertSame('datetime', $attributes['publication_date']['cast']);
+    }
+
+    /**
+     * When a model has a custom primary key (e.g. device_id) and a HasMany
+     * relation whose foreign key on the related table has the same name,
+     * the primary key must not be excluded from getAttributes().
+     *
+     * Only BelongsTo foreign keys are local columns that should be excluded.
+     * HasMany/HasOne foreign keys reference the related model's table.
+     */
+    public function testCustomPrimaryKeyNotExcludedByHasManyForeignKey(): void
+    {
+        $model = new Device();
+        $metadata = new ModelMetadata();
+        $attributes = $metadata->getAttributes($model);
+
+        $this->assertArrayHasKey('device_id', $attributes, 'Primary key "device_id" should not be excluded from attributes when it matches a HasMany foreign key name.');
+        $this->assertTrue($attributes['device_id']['primary'], 'The device_id attribute should be marked as primary key.');
     }
 }

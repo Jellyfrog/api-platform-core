@@ -27,6 +27,7 @@ use ApiPlatform\Doctrine\Odm\Filter\OrderFilter;
 use ApiPlatform\Doctrine\Odm\Filter\RangeFilter;
 use ApiPlatform\Doctrine\Odm\Filter\SearchFilter;
 use ApiPlatform\Doctrine\Odm\Metadata\Property\DoctrineMongoDbOdmPropertyMetadataFactory;
+use ApiPlatform\Doctrine\Odm\Metadata\Resource\DoctrineMongoDbOdmParameterResourceMetadataCollectionFactory;
 use ApiPlatform\Doctrine\Odm\Metadata\Resource\DoctrineMongoDbOdmResourceCollectionMetadataFactory;
 use ApiPlatform\Doctrine\Odm\PropertyInfo\DoctrineExtractor;
 use ApiPlatform\Doctrine\Odm\Serializer\DoctrineOdmOperationResourceClassResolver;
@@ -180,6 +181,7 @@ return function (ContainerConfigurator $container) {
             service('api_platform.filter_locator'),
             service('doctrine_mongodb')->nullOnInvalid(),
             service('logger')->nullOnInvalid(),
+            service('api_platform.name_converter')->nullOnInvalid(),
         ])
         ->tag('api_platform.doctrine_mongodb.odm.aggregation_extension.collection', ['priority' => 32])
         ->tag('api_platform.doctrine_mongodb.odm.aggregation_extension.item');
@@ -224,6 +226,13 @@ return function (ContainerConfigurator $container) {
         ->args([
             service('doctrine_mongodb'),
             service('api_platform.doctrine.odm.metadata.resource.metadata_collection_factory.inner'),
+        ]);
+
+    $services->set('api_platform.doctrine.odm.metadata.resource.parameter_metadata_collection_factory', DoctrineMongoDbOdmParameterResourceMetadataCollectionFactory::class)
+        ->decorate('api_platform.metadata.resource.metadata_collection_factory', null, 999)
+        ->args([
+            service('doctrine_mongodb'),
+            service('api_platform.doctrine.odm.metadata.resource.parameter_metadata_collection_factory.inner'),
         ]);
 
     $services->set('api_platform.doctrine.odm.links_handler', LinksHandler::class)

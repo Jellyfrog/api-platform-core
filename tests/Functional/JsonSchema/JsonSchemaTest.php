@@ -158,6 +158,7 @@ class JsonSchemaTest extends ApiTestCase
         ]));
 
         $this->assertEquals($schema['definitions']['BagOfTests-write']['properties']['description'], new \ArrayObject([
+            'type' => 'string',
             'maxLength' => 255,
         ]));
 
@@ -224,7 +225,7 @@ class JsonSchemaTest extends ApiTestCase
         $this->assertTrue($schema['definitions']['Resource']['properties']['resourceRelated']['readOnly'] ?? false);
     }
 
-    public function testGenIdFalse()
+    public function testGenIdFalse(): void
     {
         $schema = $this->schemaFactory->buildSchema(Product::class, 'jsonld', Schema::TYPE_OUTPUT, $this->operationMetadataFactory->create('_api_/json-stream-products_get_collection'));
         $this->assertThat(['member' => [['aggregateRating' => ['ratingValue' => '1.0', 'reviewCount' => 1]]]], new MatchesJsonSchema($schema));

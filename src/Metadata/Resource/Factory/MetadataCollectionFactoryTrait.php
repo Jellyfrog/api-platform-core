@@ -87,6 +87,7 @@ trait MetadataCollectionFactoryTrait
                 $operations = [];
                 foreach ($resource->getOperations() ?? new Operations() as $operation) {
                     [$key, $operation] = $this->getOperationWithDefaults($resource, $operation);
+                    $this->assertOperationNameIsUnique($operations, $key, $resourceClass);
                     $operations[$key] = $operation;
                 }
                 if ($operations) {
@@ -111,6 +112,9 @@ trait MetadataCollectionFactoryTrait
             }
 
             if ($metadata instanceof GraphQlOperation) {
+                if (-1 === $index) {
+                    $resources[++$index] = $this->getResourceWithDefaults($resourceClass, $shortName, new ApiResource());
+                }
                 [$key, $operation] = $this->getOperationWithDefaults($resources[$index], $metadata);
                 $graphQlOperations = $resources[$index]->getGraphQlOperations();
                 $graphQlOperations[$key] = $operation;
@@ -142,6 +146,7 @@ trait MetadataCollectionFactoryTrait
                 $operation = $operation->withPriority(++$operationPriority);
             }
             $operations = $resources[$index]->getOperations() ?? new Operations();
+            $this->assertOperationNameIsUnique(iterator_to_array($operations), $key, $resourceClass);
             $resources[$index] = $resources[$index]->withOperations($operations->add($key, $operation));
         }
 
@@ -234,21 +239,12 @@ trait MetadataCollectionFactoryTrait
      */
     private function deduplicateShortNames(array $resources): array
     {
-        $enabled = $this->defaults['extra_properties']['deduplicate_resource_short_names'] ?? false;
         $shortNameCounts = [];
 
         foreach ($resources as $index => $resource) {
             $shortName = $resource->getShortName();
             if (!isset($shortNameCounts[$shortName])) {
                 $shortNameCounts[$shortName] = 1;
-                continue;
-            }
-
-            if (!$enabled) {
-                if (1 === $shortNameCounts[$shortName]) {
-                    trigger_deprecation('api-platform/core', '4.2', 'Having multiple "#[ApiResource]" attributes with the same "shortName" "%s" on class "%s" is deprecated and will result in automatic short name deduplication in API Platform 5.x. Set "defaults.extra_properties.deduplicate_resource_short_names" to "true" in the API Platform configuration to enable it now.', $shortName, $resource->getClass());
-                }
-                ++$shortNameCounts[$shortName];
                 continue;
             }
 
@@ -271,6 +267,22 @@ trait MetadataCollectionFactoryTrait
     }
 
     /**
+     * Two operations sharing an explicit name silently overwrite each other because
+     * the operation name is the unique key (and the Symfony route name).
+     * Detect and reject upfront so users get a clear, actionable error.
+     *
+     * @param array<string, mixed> $operations
+     */
+    private function assertOperationNameIsUnique(array $operations, string $key, string $resourceClass): void
+    {
+        if (!\array_key_exists($key, $operations)) {
+            return;
+        }
+
+        throw new RuntimeException(\sprintf('Operation name "%s" is declared twice on resource "%s". Operation names must be unique because they are also used as Symfony route names. Remove the duplicate "name" so the framework can disambiguate by method, or set distinct names.', $key, $resourceClass));
+    }
+
+    /**
      * @template T of Metadata
      *
      * @param T $resource
@@ -285,7 +297,8 @@ trait MetadataCollectionFactoryTrait
                 $parameterName = $key;
             }
 
-            if (!$parameters->has($parameterName, $parameter::class)) {
+            // `:property` is a template expanded per-property later; multiple templates must coexist.
+            if (str_contains((string) $parameterName, ':property') || !$parameters->has($parameterName, $parameter::class)) {
                 $parameters->add($parameterName, $parameter);
             }
         }
