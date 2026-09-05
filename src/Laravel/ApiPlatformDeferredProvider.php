@@ -23,6 +23,7 @@ use ApiPlatform\GraphQl\Type\TypesContainerInterface;
 use ApiPlatform\JsonApi\Filter\SparseFieldset;
 use ApiPlatform\JsonApi\Filter\SparseFieldsetParameterProvider;
 use ApiPlatform\Laravel\Controller\ApiPlatformController;
+use ApiPlatform\Laravel\Eloquent\Extension\EagerLoadingExtension;
 use ApiPlatform\Laravel\Eloquent\Extension\FilterQueryExtension;
 use ApiPlatform\Laravel\Eloquent\Extension\QueryExtensionInterface;
 use ApiPlatform\Laravel\Eloquent\Filter\BooleanFilter;
@@ -115,7 +116,11 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             }
         }
 
-        $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class]);
+        $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class, EagerLoadingExtension::class]);
+
+        // Stateless and autowirable: registered as a singleton so its computed eager loads are reused across queries.
+        $this->app->singleton(EagerLoadingExtension::class);
+
         $this->app->singleton(ItemProvider::class, static function (Application $app) {
             $tagged = iterator_to_array($app->tagged(LinksHandlerInterface::class));
 
@@ -389,6 +394,7 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             CollectionProvider::class,
             SerializerFilterParameterProvider::class,
             ParameterProvider::class,
+            EagerLoadingExtension::class,
             FilterQueryExtension::class,
             'filters',
             ResourceMetadataCollectionFactoryInterface::class,

@@ -16,6 +16,7 @@ namespace ApiPlatform\Laravel\Tests;
 use ApiPlatform\Laravel\Test\ApiTestAssertionsTrait;
 use ApiPlatform\Laravel\workbench\app\Enums\BookStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase;
@@ -640,11 +641,18 @@ class EloquentTest extends TestCase
         $author = AuthorWithGroupFactory::new()->create();
         $book = BookWithRelationFactory::new(['author_with_group_id' => $author->id])->create(); // @phpstan-ignore-line
 
+        DB::enableQueryLog();
         $response = $this->get('/api/book_with_relations/'.$book->id, ['Accept' => ['application/ld+json']]); // @phpstan-ignore-line
+        $queryLog = DB::getQueryLog();
+        DB::disableQueryLog();
+
         $response->assertStatus(200);
         $json = $response->json();
 
         $this->assertArrayHasKey('authorWithGroup', $json);
         $this->assertSame('/api/author_with_groups/'.$author->id, $json['authorWithGroup']['@id']); // @phpstan-ignore-line
+
+        // The relation is eager loaded: one query for the book, one for its author, instead of N+1.
+        $this->assertLessThanOrEqual(2, \count($queryLog));
     }
 }
