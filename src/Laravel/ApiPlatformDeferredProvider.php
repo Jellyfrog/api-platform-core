@@ -23,6 +23,7 @@ use ApiPlatform\GraphQl\Type\TypesContainerInterface;
 use ApiPlatform\JsonApi\Filter\SparseFieldset;
 use ApiPlatform\JsonApi\Filter\SparseFieldsetParameterProvider;
 use ApiPlatform\Laravel\Controller\ApiPlatformController;
+use ApiPlatform\Laravel\Eloquent\Extension\EagerLoadingExtension;
 use ApiPlatform\Laravel\Eloquent\Extension\FilterQueryExtension;
 use ApiPlatform\Laravel\Eloquent\Extension\QueryExtensionInterface;
 use ApiPlatform\Laravel\Eloquent\Filter\BooleanFilter;
@@ -37,6 +38,7 @@ use ApiPlatform\Laravel\Eloquent\Filter\PartialSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\RangeFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\StartSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Metadata\Factory\Resource\EloquentResourceCollectionMetadataFactory;
+use ApiPlatform\Laravel\Eloquent\Metadata\ModelMetadata;
 use ApiPlatform\Laravel\Eloquent\State\CollectionProvider;
 use ApiPlatform\Laravel\Eloquent\State\ItemProvider;
 use ApiPlatform\Laravel\Eloquent\State\LinksHandler;
@@ -86,6 +88,7 @@ use ApiPlatform\State\ProcessorInterface;
 use ApiPlatform\State\Provider\ParameterProvider;
 use ApiPlatform\State\Provider\SecurityParameterProvider;
 use ApiPlatform\State\ProviderInterface;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Support\DeferrableProvider;
@@ -93,6 +96,7 @@ use Illuminate\Support\ServiceProvider;
 use Negotiation\Negotiator;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\ObjectMapper\ObjectMapper;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 
@@ -115,7 +119,30 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             }
         }
 
-        $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class]);
+        /** @var ConfigRepository $appConfig */
+        $appConfig = $this->app['config'];
+
+        $queryExtensions = [FilterQueryExtension::class];
+        if ($appConfig->get('api-platform.eager_loading.enabled', true)) {
+            $queryExtensions[] = EagerLoadingExtension::class;
+        }
+
+        $this->autoconfigure($classes, QueryExtensionInterface::class, $queryExtensions);
+
+        // Holds a per-model cache of computed eager loads, registered as a singleton so it is reused across queries.
+        $this->app->singleton(EagerLoadingExtension::class, static function (Application $app) {
+            /** @var ConfigRepository */
+            $config = $app['config'];
+
+            return new EagerLoadingExtension(
+                $app->make(PropertyMetadataFactoryInterface::class),
+                $app->make(ModelMetadata::class),
+                (int) $config->get('api-platform.eager_loading.max_joins', 30),
+                (bool) $config->get('api-platform.eager_loading.force_eager', true),
+                $app->make(ClassMetadataFactoryInterface::class),
+            );
+        });
+
         $this->app->singleton(ItemProvider::class, static function (Application $app) {
             $tagged = iterator_to_array($app->tagged(LinksHandlerInterface::class));
 
@@ -389,6 +416,7 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             CollectionProvider::class,
             SerializerFilterParameterProvider::class,
             ParameterProvider::class,
+            EagerLoadingExtension::class,
             FilterQueryExtension::class,
             'filters',
             ResourceMetadataCollectionFactoryInterface::class,

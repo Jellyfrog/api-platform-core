@@ -218,4 +218,17 @@ return [
     'error_handler' => [
         'extend_laravel_handler' => true,
     ],
+
+    'eager_loading' => [
+        // Enable the eager loading of relations. When disabled, relations are loaded lazily, one
+        // query per relation and per record.
+        'enabled' => true,
+
+        // Eager load every readable relation. Set to false to only eager load relations that opted in
+        // with #[ApiProperty(fetchEager: true)].
+        'force_eager' => true,
+
+        // Max number of eager loaded relations before EagerLoadingExtension throws a RuntimeException.
+        'max_joins' => 30,
+    ],
 ];
