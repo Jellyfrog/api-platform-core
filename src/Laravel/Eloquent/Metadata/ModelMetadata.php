@@ -185,6 +185,28 @@ final class ModelMetadata
     }
 
     /**
+     * Gets the relations for the given model class.
+     *
+     * The relations are cached per class, so a seeded or already computed graph is served without
+     * instantiating the model. Classes that cannot be instantiated (abstract, or not a model at all)
+     * yield no relations instead of fataling: a dumped metadata file may name a class that changed.
+     *
+     * @return array<string, mixed>
+     */
+    public function getRelationsForClass(string $modelClass): array
+    {
+        if (isset($this->relations[$modelClass])) {
+            return $this->relations[$modelClass];
+        }
+
+        if (!is_a($modelClass, Model::class, true) || !(new \ReflectionClass($modelClass))->isInstantiable()) {
+            return [];
+        }
+
+        return $this->getRelations(new $modelClass());
+    }
+
+    /**
      * Gets the relations from the given model.
      *
      * @return array<string, mixed>

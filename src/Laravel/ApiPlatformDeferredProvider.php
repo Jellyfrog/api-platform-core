@@ -38,6 +38,7 @@ use ApiPlatform\Laravel\Eloquent\Filter\PartialSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\RangeFilter;
 use ApiPlatform\Laravel\Eloquent\Filter\StartSearchFilter;
 use ApiPlatform\Laravel\Eloquent\Metadata\Factory\Resource\EloquentResourceCollectionMetadataFactory;
+use ApiPlatform\Laravel\Eloquent\Metadata\ModelMetadata;
 use ApiPlatform\Laravel\Eloquent\State\CollectionProvider;
 use ApiPlatform\Laravel\Eloquent\State\ItemProvider;
 use ApiPlatform\Laravel\Eloquent\State\LinksHandler;
@@ -87,6 +88,7 @@ use ApiPlatform\State\ProcessorInterface;
 use ApiPlatform\State\Provider\ParameterProvider;
 use ApiPlatform\State\Provider\SecurityParameterProvider;
 use ApiPlatform\State\ProviderInterface;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Support\DeferrableProvider;
@@ -118,8 +120,18 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
 
         $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class, EagerLoadingExtension::class]);
 
-        // Stateless and autowirable: registered as a singleton so its computed eager loads are reused across queries.
-        $this->app->singleton(EagerLoadingExtension::class);
+        // Holds a per-model cache of computed eager loads, registered as a singleton so it is reused across queries.
+        $this->app->singleton(EagerLoadingExtension::class, static function (Application $app) {
+            /** @var ConfigRepository */
+            $config = $app['config'];
+
+            return new EagerLoadingExtension(
+                $app->make(PropertyMetadataFactoryInterface::class),
+                $app->make(ModelMetadata::class),
+                (bool) $config->get('api-platform.eager_loading.force_eager', true),
+                (int) $config->get('api-platform.eager_loading.max_joins', 30),
+            );
+        });
 
         $this->app->singleton(ItemProvider::class, static function (Application $app) {
             $tagged = iterator_to_array($app->tagged(LinksHandlerInterface::class));

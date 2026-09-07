@@ -27,8 +27,10 @@ use Workbench\Database\Factories\AuthorFactory;
 use Workbench\Database\Factories\AuthorWithGroupFactory;
 use Workbench\Database\Factories\BookFactory;
 use Workbench\Database\Factories\BookWithRelationFactory;
+use Workbench\Database\Factories\CommentFactory;
 use Workbench\Database\Factories\CommentMorphFactory;
 use Workbench\Database\Factories\GrandSonFactory;
+use Workbench\Database\Factories\PostFactory;
 use Workbench\Database\Factories\PostWithMorphManyFactory;
 use Workbench\Database\Factories\TimeSlotFactory;
 use Workbench\Database\Factories\WithAccessorFactory;
@@ -652,7 +654,47 @@ class EloquentTest extends TestCase
         $this->assertArrayHasKey('authorWithGroup', $json);
         $this->assertSame('/api/author_with_groups/'.$author->id, $json['authorWithGroup']['@id']); // @phpstan-ignore-line
 
-        // The relation is eager loaded: one query for the book, one for its author, instead of N+1.
-        $this->assertLessThanOrEqual(2, \count($queryLog));
+        // An item request costs the same number of queries either way, so assert the shape instead:
+        // the relation is loaded as a batch, which lazy loading (where "id" = ? limit 1) never is.
+        $this->assertCount(2, $queryLog);
+        $this->assertStringContainsString('in (', $queryLog[1]['query']);
+    }
+
+    public function testCollectionEagerLoadsRelationInGroup(): void
+    {
+        WithAccessorFactory::new()->count(10)->create();
+
+        DB::enableQueryLog();
+        $response = $this->get('/api/with_accessors', ['Accept' => ['application/ld+json']]);
+        $queryLog = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $response->assertStatus(200);
+        $this->assertCount(10, $response->json()['member']);
+
+        // Count, page, and a single batched query for the relation of all ten rows: without eager
+        // loading this is eleven more queries.
+        $this->assertCount(3, $queryLog);
+        $this->assertStringContainsString('in (', $queryLog[2]['query']);
+    }
+
+    public function testRelationWithUriTemplateIsLinkedNotLoaded(): void
+    {
+        $post = PostFactory::new()->create();
+        CommentFactory::new(['post_id' => $post->id])->count(3)->create(); // @phpstan-ignore-line
+
+        DB::enableQueryLog();
+        $response = $this->get('/api/posts/'.$post->id, ['Accept' => ['application/ld+json']]); // @phpstan-ignore-line
+        $queryLog = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $response->assertStatus(200);
+
+        // Comments are exposed through their own URI, so they are rendered as a link and never loaded.
+        $this->assertSame('/api/posts/'.$post->id.'/comments', $response->json()['comments']); // @phpstan-ignore-line
+        $this->assertSame([], array_filter(
+            array_column($queryLog, 'query'),
+            static fn (string $query): bool => str_contains($query, 'comments')
+        ));
     }
 }
