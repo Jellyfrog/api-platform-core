@@ -218,4 +218,13 @@ return [
     'error_handler' => [
         'extend_laravel_handler' => true,
     ],
+
+    'eager_loading' => [
+        // Eager load every readable relation. Set to false to only eager load relations that opted in
+        // with #[ApiProperty(fetchEager: true)].
+        'force_eager' => true,
+
+        // Maximum number of relations to eager load. Relations past this limit are loaded lazily.
+        'max_joins' => 30,
+    ],
 ];
