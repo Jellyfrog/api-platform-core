@@ -96,6 +96,7 @@ use Illuminate\Support\ServiceProvider;
 use Negotiation\Negotiator;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\ObjectMapper\ObjectMapper;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 
@@ -118,7 +119,15 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             }
         }
 
-        $this->autoconfigure($classes, QueryExtensionInterface::class, [FilterQueryExtension::class, EagerLoadingExtension::class]);
+        /** @var ConfigRepository $appConfig */
+        $appConfig = $this->app['config'];
+
+        $queryExtensions = [FilterQueryExtension::class];
+        if ($appConfig->get('api-platform.eager_loading.enabled', true)) {
+            $queryExtensions[] = EagerLoadingExtension::class;
+        }
+
+        $this->autoconfigure($classes, QueryExtensionInterface::class, $queryExtensions);
 
         // Holds a per-model cache of computed eager loads, registered as a singleton so it is reused across queries.
         $this->app->singleton(EagerLoadingExtension::class, static function (Application $app) {
@@ -128,8 +137,9 @@ class ApiPlatformDeferredProvider extends ServiceProvider implements DeferrableP
             return new EagerLoadingExtension(
                 $app->make(PropertyMetadataFactoryInterface::class),
                 $app->make(ModelMetadata::class),
-                (bool) $config->get('api-platform.eager_loading.force_eager', true),
                 (int) $config->get('api-platform.eager_loading.max_joins', 30),
+                (bool) $config->get('api-platform.eager_loading.force_eager', true),
+                $app->make(ClassMetadataFactoryInterface::class),
             );
         });
 

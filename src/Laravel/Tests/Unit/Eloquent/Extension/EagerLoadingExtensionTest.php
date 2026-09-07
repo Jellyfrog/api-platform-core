@@ -16,12 +16,18 @@ namespace ApiPlatform\Laravel\Tests\Unit\Eloquent\Extension;
 use ApiPlatform\Laravel\Eloquent\Extension\EagerLoadingExtension;
 use ApiPlatform\Laravel\Eloquent\Metadata\ModelMetadata;
 use ApiPlatform\Metadata\ApiProperty;
+use ApiPlatform\Metadata\Exception\RuntimeException;
 use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Orchestra\Testbench\TestCase;
+use Symfony\Component\Serializer\Mapping\AttributeMetadata;
+use Symfony\Component\Serializer\Mapping\ClassMetadata;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
+use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
+use Symfony\Component\Serializer\Normalizer\AbstractObjectNormalizer;
 use Workbench\App\Models\Author;
 use Workbench\App\Models\Book;
 
@@ -66,6 +72,8 @@ class EagerLoadingExtensionTest extends TestCase
 
     public function testForceEagerFalseOnlyLoadsExplicitFetchEager(): void
     {
+        // Eloquent has no per-relation fetch mode, so fetchEager plays the role Doctrine's EAGER
+        // fetch mode plays in the Symfony version.
         $this->applyExtension(
             [Book::class => [
                 'author' => $this->relation('author', Book::class),
@@ -95,8 +103,30 @@ class EagerLoadingExtensionTest extends TestCase
                 Book::class => ['author' => $this->relation('author', Author::class)],
                 Author::class => ['books' => $this->relation('books', Book::class)],
             ],
-            new ApiProperty(readable: true, readableLink: true),
+            // Only an embedded relation is walked further, so the author is walked and its books,
+            // rendered as links, end the branch.
+            static fn (string $resourceClass, string $property): ApiProperty => new ApiProperty(
+                readable: true,
+                readableLink: 'author' === $property,
+            ),
             ['author', 'author.books'],
+        );
+    }
+
+    public function testMaxJoinsExceededThrows(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('The total number of eager loaded relations has exceeded the specified maximum.');
+
+        // Both sides are embedded, so the walk ping-pongs between the two models until it gives up.
+        $this->applyExtension(
+            [
+                Book::class => ['author' => $this->relation('author', Author::class)],
+                Author::class => ['books' => $this->relation('books', Book::class)],
+            ],
+            new ApiProperty(readable: true, readableLink: true),
+            null,
+            maxJoins: 2,
         );
     }
 
@@ -123,9 +153,91 @@ class EagerLoadingExtensionTest extends TestCase
                 Book::class => ['author' => $this->relation('author', Author::class)],
                 Author::class => ['books' => $this->relation('books', Book::class)],
             ],
-            new ApiProperty(readable: true, readableLink: true),
+            static fn (string $resourceClass, string $property): ApiProperty => new ApiProperty(
+                readable: true,
+                readableLink: 'author' === $property,
+            ),
             null,
             alreadyEagerLoaded: ['author' => static function (): void {}],
+        );
+    }
+
+    public function testRelationOutsideTheRequestedAttributesIsSkipped(): void
+    {
+        $this->applyExtension(
+            [Book::class => ['author' => $this->relation('author', Author::class)]],
+            new ApiProperty(readable: true, readableLink: false),
+            null,
+            context: [AbstractNormalizer::ATTRIBUTES => ['title' => true]],
+        );
+    }
+
+    public function testRequestedAttributesNarrowTheSubtree(): void
+    {
+        // The author is asked for, but only its name is: its own relations are not part of the payload.
+        $this->applyExtension(
+            [
+                Book::class => ['author' => $this->relation('author', Author::class)],
+                Author::class => ['books' => $this->relation('books', Book::class)],
+            ],
+            new ApiProperty(readable: true, readableLink: true),
+            ['author'],
+            context: [AbstractNormalizer::ATTRIBUTES => ['author' => ['name' => true]]],
+        );
+    }
+
+    public function testMaxDepthLimitsTheWalk(): void
+    {
+        $this->applyExtension(
+            [
+                Book::class => ['author' => $this->relation('author', Author::class)],
+                Author::class => ['books' => $this->relation('books', Book::class)],
+            ],
+            new ApiProperty(readable: true, readableLink: true),
+            ['author'],
+            context: [AbstractObjectNormalizer::ENABLE_MAX_DEPTH => true],
+            classMetadataFactory: $this->classMetadataFactory(Book::class, 'author', 1),
+        );
+    }
+
+    public function testMaxDepthIsIgnoredWhenNotEnabled(): void
+    {
+        $this->applyExtension(
+            [
+                Book::class => ['author' => $this->relation('author', Author::class)],
+                Author::class => ['books' => $this->relation('books', Book::class)],
+            ],
+            static fn (string $resourceClass, string $property): ApiProperty => new ApiProperty(
+                readable: true,
+                readableLink: 'author' === $property,
+            ),
+            ['author', 'author.books'],
+            classMetadataFactory: $this->classMetadataFactory(Book::class, 'author', 1),
+        );
+    }
+
+    public function testDenormalizationGroupsAreUsedWhenDenormalizing(): void
+    {
+        $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
+        $propertyMetadataFactory->method('create')->willReturnCallback(
+            function (string $resourceClass, string $property, array $options): ApiProperty {
+                // A relation denormalized from an IRI is read with the denormalization context.
+                $this->assertSame(['book:write'], $options['serializer_groups']);
+
+                return new ApiProperty(readable: true, readableLink: false);
+            }
+        );
+
+        $extension = new EagerLoadingExtension(
+            $propertyMetadataFactory,
+            new ModelMetadata(relations: [Book::class => ['author' => $this->relation('author', Author::class)]]),
+        );
+
+        $extension->apply(
+            $this->mockBuilder(['author']),
+            [],
+            new Get(class: Book::class, normalizationContext: ['groups' => ['book:read']], denormalizationContext: ['groups' => ['book:write']]),
+            ['api_denormalize' => true],
         );
     }
 
@@ -166,10 +278,11 @@ class EagerLoadingExtensionTest extends TestCase
      * @param list<string>|null                         $expectedEagerLoads   the relations expected to be eager loaded, null when none should be
      * @param array<string, mixed>|null                 $normalizationContext the operation normalization context
      * @param array<string, mixed>                      $alreadyEagerLoaded   eager loads already registered on the builder
+     * @param array<string, mixed>                      $context              the context the extension is applied with
      *
      * @return Builder<Model>
      */
-    private function applyExtension(array $relations, ApiProperty|\Closure $propertyMetadata, ?array $expectedEagerLoads, bool $forceEager = true, ?array $normalizationContext = ['groups' => ['book:read']], array $alreadyEagerLoaded = []): Builder
+    private function applyExtension(array $relations, ApiProperty|\Closure $propertyMetadata, ?array $expectedEagerLoads, bool $forceEager = true, ?array $normalizationContext = ['groups' => ['book:read']], array $alreadyEagerLoaded = [], array $context = [], int $maxJoins = 30, ?ClassMetadataFactoryInterface $classMetadataFactory = null): Builder
     {
         $propertyMetadataFactory = $this->createMock(PropertyMetadataFactoryInterface::class);
         $propertyMetadataFactory->method('create')->willReturnCallback(
@@ -181,10 +294,12 @@ class EagerLoadingExtensionTest extends TestCase
         $extension = new EagerLoadingExtension(
             $propertyMetadataFactory,
             new ModelMetadata(relations: $relations),
+            maxJoins: $maxJoins,
             forceEager: $forceEager,
+            classMetadataFactory: $classMetadataFactory,
         );
 
-        return $extension->apply($builder, [], new Get(class: Book::class, normalizationContext: $normalizationContext));
+        return $extension->apply($builder, [], new Get(class: Book::class, normalizationContext: $normalizationContext), $context);
     }
 
     /**
@@ -206,6 +321,25 @@ class EagerLoadingExtensionTest extends TestCase
         }
 
         return $builder;
+    }
+
+    /**
+     * A serializer class metadata factory declaring a max depth on a single attribute.
+     */
+    private function classMetadataFactory(string $class, string $attribute, int $maxDepth): ClassMetadataFactoryInterface
+    {
+        $attributeMetadata = new AttributeMetadata($attribute);
+        $attributeMetadata->setMaxDepth($maxDepth);
+
+        $classMetadata = new ClassMetadata($class);
+        $classMetadata->addAttributeMetadata($attributeMetadata);
+
+        $classMetadataFactory = $this->createMock(ClassMetadataFactoryInterface::class);
+        $classMetadataFactory->method('getMetadataFor')->willReturnCallback(
+            static fn (string|object $value): ClassMetadata => $class === $value ? $classMetadata : new ClassMetadata(\is_string($value) ? $value : $value::class)
+        );
+
+        return $classMetadataFactory;
     }
 
     /**
